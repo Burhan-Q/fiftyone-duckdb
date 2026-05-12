@@ -1,0 +1,10 @@
+name: "@Burhan-Q/fo-duckdb"
+type: plugin
+author: "Burhan Qaddoumi"
+version: 0.1.0
+license: Apache-2.0
+description: "In-browser analytics with DuckDB-WASM — histograms, correlations, outliers, and more on scalar fields."
+fiftyone:
+  version: ">=1.0"
+panels:
+  - duckdb_analytics

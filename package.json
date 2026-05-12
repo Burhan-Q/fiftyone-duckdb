@@ -1,0 +1,36 @@
+{
+  "name": "@Burhan-Q/fo-duckdb",
+  "version": "0.1.0",
+  "description": "DuckDB-WASM in-browser analytics panel for FiftyOne",
+  "main": "dist/index.umd.js",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch"
+  },
+  "dependencies": {
+    "@duckdb/duckdb-wasm": "1.33.1-dev45.0",
+    "@voxel51/voodo": "^0.0.27",
+    "apache-arrow": "^21.0.0",
+    "plotly.js-cartesian-dist-min": "^3.5.1",
+    "react-plotly.js": "^2.6.0"
+  },
+  "peerDependencies": {
+    "@fiftyone/components": "*",
+    "@fiftyone/operators": "*",
+    "@fiftyone/plugins": "*",
+    "@fiftyone/spaces": "*",
+    "@fiftyone/state": "*",
+    "@mui/material": "*",
+    "react": "*",
+    "react-dom": "*",
+    "recoil": "*"
+  },
+  "devDependencies": {
+    "@mui/material": "^5.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-plotly.js": "^2.6.3",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0",
+    "vite-plugin-css-injected-by-js": "^5.0.1"
+  }
+}
