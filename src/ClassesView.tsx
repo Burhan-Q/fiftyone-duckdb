@@ -466,7 +466,7 @@ export function ClassesView(props: ClassesViewProps) {
     );
     }
   } else if (subview === "cooccurrence") {
-    if (!(result as any).labels?.length) {
+    if (!(result as any)?.labels?.length) {
       resultArea = (
         <Toast
           open variant={Variant.Secondary}
