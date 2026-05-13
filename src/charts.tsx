@@ -97,11 +97,14 @@ export function HistogramChart({
   counts,
   field,
   variant = "bar",
+  onSelectBin,
 }: {
   bins: (number | bigint)[];
   counts: (number | bigint)[];
   field: string;
   variant?: HistogramVariant;
+  /** Called when the user clicks a bar; provides the inclusive bin range. */
+  onSelectBin?: (range: { min: number; max: number }) => void;
 }) {
   const x = bins.map((v) => num(v) ?? 0);
   const y = counts.map((v) => num(v) ?? 0);
@@ -126,6 +129,8 @@ export function HistogramChart({
           marker: { color: ORANGE, line: { color: ORANGE, width: 0 } },
           hovertemplate: `${field}: %{x:.4f}<br>count: %{y}<extra></extra>`,
         };
+  // Estimate per-bin half-width so a click produces a sensible range.
+  const halfWidth = x.length > 1 ? (x[1] - x[0]) / 2 : 0.5;
   return (
     <Plot
       data={[trace]}
@@ -138,6 +143,14 @@ export function HistogramChart({
       config={COMMON_CONFIG}
       style={{ width: "100%", height: "100%" }}
       useResizeHandler
+      onClick={(evt: any) => {
+        if (!onSelectBin) return;
+        const pt = evt?.points?.[0];
+        if (!pt) return;
+        const xv = Number(pt.x);
+        if (!Number.isFinite(xv)) return;
+        onSelectBin({ min: xv - halfWidth, max: xv + halfWidth });
+      }}
     />
   );
 }
@@ -146,9 +159,12 @@ export function HistogramChart({
 export function HeatmapChart({
   matrix,
   labels,
+  onSelectCell,
 }: {
   matrix: (number | null)[][];
   labels: string[];
+  /** Called when a heatmap cell is clicked. */
+  onSelectCell?: (cell: { row: string; col: string }) => void;
 }) {
   if (!matrix || matrix.length === 0 || !labels || labels.length === 0) {
     return <EmptyChart message="Pick 2+ numeric fields to correlate" />;
@@ -185,6 +201,15 @@ export function HeatmapChart({
       config={COMMON_CONFIG}
       style={{ width: "100%", height: "100%" }}
       useResizeHandler
+      onClick={(evt: any) => {
+        if (!onSelectCell) return;
+        const pt = evt?.points?.[0];
+        if (!pt) return;
+        const col = String(pt.x);
+        const row = String(pt.y);
+        if (!col || !row) return;
+        onSelectCell({ row, col });
+      }}
     />
   );
 }
@@ -201,11 +226,14 @@ export function ScatterChart({
   xLabel,
   yLabel,
   colorLabel,
+  onSelectIndices,
 }: {
   points: ScatterPoint[];
   xLabel: string;
   yLabel: string;
   colorLabel?: string;
+  /** Called when the user lassos points; provides indices into ``points``. */
+  onSelectIndices?: (indices: number[]) => void;
 }) {
   if (!points || points.length === 0) {
     return <EmptyChart message="No points to plot" />;
@@ -238,6 +266,26 @@ export function ScatterChart({
       },
     ];
   }
+  // Build a flat (traceIndex, pointIndex) → original index map so onSelected
+  // can return indices into the caller's ``points`` array regardless of
+  // whether traces are grouped.
+  const indexMap: number[][] = [];
+  if (hasGroups) {
+    let cursor = 0;
+    const groupIndexLookup = new Map<string, number[]>();
+    for (let i = 0; i < points.length; i++) {
+      const k = points[i].group == null ? "(null)" : String(points[i].group);
+      if (!groupIndexLookup.has(k)) groupIndexLookup.set(k, []);
+      groupIndexLookup.get(k)!.push(i);
+    }
+    for (const [, originals] of groupIndexLookup) {
+      indexMap.push(originals);
+      cursor += originals.length;
+    }
+  } else {
+    indexMap.push(points.map((_, i) => i));
+  }
+
   return (
     <Plot
       data={traces}
@@ -247,10 +295,27 @@ export function ScatterChart({
         yaxis: { title: { text: yLabel } },
         showlegend: hasGroups,
         legend: { title: { text: colorLabel ?? "" } },
+        dragmode: onSelectIndices ? "lasso" : undefined,
       }}
-      config={COMMON_CONFIG}
+      config={{ ...COMMON_CONFIG, displayModeBar: !!onSelectIndices }}
       style={{ width: "100%", height: "100%" }}
       useResizeHandler
+      onSelected={(evt: any) => {
+        if (!onSelectIndices) return;
+        if (!evt?.points) {
+          onSelectIndices([]); // empty selection → clear
+          return;
+        }
+        const orig: number[] = [];
+        for (const p of evt.points) {
+          const ti = p.curveNumber ?? 0;
+          const pi = p.pointIndex ?? 0;
+          const idx = indexMap[ti]?.[pi];
+          if (idx !== undefined) orig.push(idx);
+        }
+        onSelectIndices(orig);
+      }}
+      onDeselect={() => onSelectIndices?.([])}
     />
   );
 }
@@ -264,11 +329,14 @@ export function GroupByChart({
   groupLabel,
   valueLabel,
   variant = "box",
+  onSelectGroup,
 }: {
   groups: GroupedValues[];
   groupLabel: string;
   valueLabel: string;
   variant?: GroupByVariant;
+  /** Called when the user clicks a category. */
+  onSelectGroup?: (group: string) => void;
 }) {
   if (!groups || groups.length === 0) {
     return <EmptyChart message="Pick a numeric and a categorical field" />;
@@ -317,6 +385,15 @@ export function GroupByChart({
       config={COMMON_CONFIG}
       style={{ width: "100%", height: "100%" }}
       useResizeHandler
+      onClick={(evt: any) => {
+        if (!onSelectGroup) return;
+        // For box/violin: pt.x is the trace name (= group). For bar: pt.x
+        // is the category from the x array.
+        const pt = evt?.points?.[0];
+        if (!pt) return;
+        const g = pt.x != null ? String(pt.x) : pt.data?.name;
+        if (g) onSelectGroup(g);
+      }}
     />
   );
 }
@@ -352,6 +429,148 @@ export function MissingTable({ rows }: { rows: MissingRow[] }) {
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+// ---------- Bar chart (simple + grouped) ----------
+export function BarChart({
+  x,
+  y,
+  xLabel,
+  yLabel,
+  groups,
+  onSelectBar,
+}: {
+  x: string[];
+  y: number[];
+  xLabel: string;
+  yLabel: string;
+  /** When provided, renders grouped bars (one trace per group) instead of a single trace. */
+  groups?: Array<{ name: string; y: number[] }>;
+  /** Called when the user clicks a bar; provides the x-axis label clicked. */
+  onSelectBar?: (label: string) => void;
+}) {
+  if (!x.length) {
+    return <EmptyChart message="No values to plot" />;
+  }
+  const traces: any[] = groups && groups.length > 0
+    ? groups.map((g, i) => ({
+        type: "bar",
+        name: g.name,
+        x,
+        y: g.y.map((v) => num(v) ?? 0),
+        marker: { color: i === 0 ? ORANGE : "#4ea1ff" },
+        hovertemplate: `${g.name}<br>%{x}: %{y}<extra></extra>`,
+      }))
+    : [{
+        type: "bar",
+        x,
+        y: y.map((v) => num(v) ?? 0),
+        marker: { color: ORANGE },
+        hovertemplate: `%{x}: %{y}<extra></extra>`,
+      }];
+  return (
+    <Plot
+      data={traces}
+      layout={{
+        ...COMMON_LAYOUT,
+        barmode: groups ? "group" : undefined,
+        bargap: 0.15,
+        xaxis: { title: { text: xLabel }, automargin: true, tickangle: -30 },
+        yaxis: { title: { text: yLabel }, rangemode: "tozero" },
+        showlegend: !!groups,
+        legend: { orientation: "h", y: 1.15 },
+      }}
+      config={COMMON_CONFIG}
+      style={{ width: "100%", height: "100%" }}
+      useResizeHandler
+      onClick={(evt: any) => {
+        if (!onSelectBar) return;
+        const pt = evt?.points?.[0];
+        if (!pt) return;
+        const lab = pt.x != null ? String(pt.x) : "";
+        if (lab) onSelectBar(lab);
+      }}
+    />
+  );
+}
+
+// ---------- 2-D heatmap (Spatial class-conditional density) ----------
+export function Heatmap2DChart({
+  x,
+  y,
+  xLabel,
+  yLabel,
+  nBins = 30,
+  onSelectRegion,
+}: {
+  x: number[];
+  y: number[];
+  xLabel: string;
+  yLabel: string;
+  nBins?: number;
+  /** Called when the user box-selects a region. */
+  onSelectRegion?: (region: { x0: number; x1: number; y0: number; y1: number } | null) => void;
+}) {
+  const xs = x.map((v) => num(v)).filter((v): v is number => v !== null);
+  const ys = y.map((v) => num(v)).filter((v): v is number => v !== null);
+  if (xs.length === 0) {
+    return <EmptyChart message="No spatial data for this class" />;
+  }
+  return (
+    <Plot
+      data={[
+        {
+          type: "histogram2d",
+          x: xs,
+          y: ys,
+          nbinsx: nBins,
+          nbinsy: nBins,
+          colorscale: "Hot",
+          reversescale: true,
+          hovertemplate: `${xLabel}: %{x:.3f}<br>${yLabel}: %{y:.3f}<br>count: %{z}<extra></extra>`,
+        } as any,
+      ]}
+      layout={{
+        ...COMMON_LAYOUT,
+        // Image coordinates: origin top-left so the heatmap reads like an
+        // image overlay (bbox_cy = 0 is the top of the image).
+        xaxis: { title: { text: xLabel }, range: [0, 1], constrain: "domain" } as any,
+        yaxis: {
+          title: { text: yLabel },
+          range: [1, 0],
+          scaleanchor: "x",
+          scaleratio: 1,
+        } as any,
+        dragmode: onSelectRegion ? "select" : undefined,
+      }}
+      config={{ ...COMMON_CONFIG, displayModeBar: !!onSelectRegion }}
+      style={{ width: "100%", height: "100%" }}
+      useResizeHandler
+      onSelected={(evt: any) => {
+        if (!onSelectRegion) return;
+        const range = evt?.range;
+        if (!range) {
+          onSelectRegion(null);
+          return;
+        }
+        const [x0, x1] = range.x ?? [];
+        const [y0a, y0b] = range.y ?? [];
+        // Y axis is reversed (image coords): normalize so y0 < y1.
+        const y0 = Math.min(y0a, y0b);
+        const y1 = Math.max(y0a, y0b);
+        if (
+          !Number.isFinite(x0) || !Number.isFinite(x1) ||
+          !Number.isFinite(y0) || !Number.isFinite(y1)
+        ) return;
+        onSelectRegion({
+          x0: Math.min(x0, x1),
+          x1: Math.max(x0, x1),
+          y0, y1,
+        });
+      }}
+      onDeselect={() => onSelectRegion?.(null)}
+    />
   );
 }
 

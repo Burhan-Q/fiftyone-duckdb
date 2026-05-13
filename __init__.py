@@ -24,6 +24,12 @@ SKIP_TOP = ("_id", "tags")  # 'id' kept for joining to nested tables
 # Hard cap so a weird schema can't blow up DuckDB or the wire payload.
 MAX_COLS_PER_TABLE = 256
 
+# Per-class count columns on the samples table are capped to keep widths sane.
+# Top-K classes by global frequency get dedicated columns; the rest roll up
+# into a single ``_label_count_other`` column.
+TOP_K_LABEL_COLUMNS = 30
+LABEL_LEAF_NAME = "label"
+
 
 def _kind_for(field):
     """Return ``"numeric"`` / ``"categorical"`` / ``None`` for a Field."""
@@ -46,6 +52,66 @@ def _list_doc_roots(schema):
         if isinstance(field, fo.ListField)
         and isinstance(field.field, fo.EmbeddedDocumentField)
     ]
+
+
+def _label_bearing_roots(schema):
+    """List-of-doc roots whose embedded schema has a ``label`` StringField."""
+    out = []
+    for root in _list_doc_roots(schema):
+        leaf = f"{root}.{LABEL_LEAF_NAME}"
+        field = schema.get(leaf)
+        if isinstance(field, fo.StringField):
+            out.append(root)
+    return out
+
+
+def _top_classes_for_root(view_or_dataset, root, k=TOP_K_LABEL_COLUMNS):
+    """Return ``(top_k, rest)`` lists of ``(class, count)`` pairs.
+
+    ``top_k`` holds the up-to-``k`` most frequent classes (count-desc, then
+    alphabetical for stability); ``rest`` is everything beyond that.
+    """
+    counts = view_or_dataset.count_values(f"{root}.{LABEL_LEAF_NAME}") or {}
+    pairs = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return pairs[:k], pairs[k:]
+
+
+def _safe_class(name):
+    """Slugify a class name to a DuckDB-friendly identifier.
+
+    Lowercases, replaces any non-``[a-z0-9_]`` run with ``_``, and trims
+    leading/trailing underscores. Always returns a non-empty string
+    (falls back to a hex digest of the input when the slug would be empty,
+    e.g. for non-Latin scripts).
+    """
+    import hashlib
+    import re
+
+    s = re.sub(r"[^a-z0-9_]+", "_", str(name).lower()).strip("_")
+    if not s:
+        s = "c_" + hashlib.md5(str(name).encode("utf-8")).hexdigest()[:8]
+    return s
+
+
+def _build_class_alias_map(classes):
+    """Map each original class name → DuckDB-safe slug, disambiguating clashes.
+
+    Iteration is order-preserving so callers can pass an ordered list and
+    get stable slugs. When two distinct inputs would slugify to the same
+    string, later entries get a numeric suffix (``_1``, ``_2``, ...).
+    """
+    aliases = {}
+    used = set()
+    for name in classes:
+        base = _safe_class(name)
+        slug = base
+        i = 1
+        while slug in used:
+            slug = f"{base}_{i}"
+            i += 1
+        used.add(slug)
+        aliases[name] = slug
+    return aliases
 
 
 def _top_level_scalar_fields(schema, list_roots):
@@ -136,14 +202,21 @@ def _expand_fixed_list(leaf, raw):
 def _extract_top_table(view, fields, list_roots, schema):
     """Build the ``samples`` table.
 
-    Returns ``(data, columns)`` where ``data`` is the columnar dict and
-    ``columns`` is a list of ``(col_name, kind)`` pairs.
+    Returns ``(data, columns, label_aliases)`` where ``data`` is the columnar
+    dict, ``columns`` is a list of ``(col_name, kind)`` pairs, and
+    ``label_aliases`` is ``{root_safe: {original_class: slug}}`` for every
+    label-bearing root.
 
     For each list-of-doc root we additionally synthesize per-sample
     aggregates (``<root>_count``, plus ``<root>_<field>_avg/min/max`` for
-    each numeric leaf) so the samples table is a one-stop view that
-    enables cross-domain correlations without explicit SQL joins.
+    each numeric leaf, and label-specific columns for any root whose
+    embedded schema has a ``label`` field) so the samples table is a
+    one-stop view that enables cross-domain correlations without explicit
+    SQL joins.
     """
+    label_roots = set(_label_bearing_roots(schema))
+    label_aliases: dict = {}
+
     data = {"id": view.values("id")}
     columns = [("id", "categorical")]
     for path, kind in fields[:MAX_COLS_PER_TABLE]:
@@ -239,7 +312,75 @@ def _extract_top_table(view, fields, list_roots, schema):
             columns.append((f"{prefix}_min", "numeric"))
             columns.append((f"{prefix}_max", "numeric"))
 
-    return data, columns
+        # --- Label-driven columns ---
+        # Only roots whose embedded schema has a ``label`` StringField. Adds
+        # ``<root>_top_label`` (modal class), ``<root>_unique_label_count``,
+        # ``<root>_label_count_<class>`` for top-K classes, and
+        # ``<root>_label_count_other`` for the tail.
+        if root not in label_roots:
+            continue
+        if len(columns) >= MAX_COLS_PER_TABLE:
+            continue
+
+        per_sample_labels = view.values(f"{root}.{LABEL_LEAF_NAME}")
+        top_pairs, rest_pairs = _top_classes_for_root(view, root)
+        top_classes = [c for c, _ in top_pairs]
+        rest_classes_set = {c for c, _ in rest_pairs}
+
+        # Build alias map across both top and tail so the UI can label nicely.
+        # Iteration order: top first (most useful), then tail.
+        root_safe = _safe_name(root)
+        aliases = _build_class_alias_map(top_classes + sorted(rest_classes_set))
+        label_aliases[root_safe] = aliases
+
+        modal = []
+        unique_count = []
+        for ls in per_sample_labels:
+            if not ls:
+                modal.append(None)
+                unique_count.append(0)
+                continue
+            cnt: dict = {}
+            for x in ls:
+                if x is None:
+                    continue
+                cnt[x] = cnt.get(x, 0) + 1
+            if not cnt:
+                modal.append(None)
+                unique_count.append(0)
+                continue
+            # Tie-break: most frequent, then alphabetical for determinism.
+            top = sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+            modal.append(top)
+            unique_count.append(len(cnt))
+
+        data[f"{root_safe}_top_label"] = modal
+        columns.append((f"{root_safe}_top_label", "categorical"))
+        data[f"{root_safe}_unique_label_count"] = unique_count
+        columns.append((f"{root_safe}_unique_label_count", "numeric"))
+
+        # Per-class count columns
+        for cls in top_classes:
+            if len(columns) >= MAX_COLS_PER_TABLE:
+                break
+            slug = aliases[cls]
+            col = f"{root_safe}_label_count_{slug}"
+            data[col] = [
+                sum(1 for x in (ls or []) if x == cls)
+                for ls in per_sample_labels
+            ]
+            columns.append((col, "numeric"))
+
+        # Roll-up column for the tail
+        if rest_classes_set and len(columns) < MAX_COLS_PER_TABLE:
+            col = f"{root_safe}_label_count_other"
+            data[col] = [
+                sum(1 for x in (ls or []) if x in rest_classes_set)
+                for ls in per_sample_labels
+            ]
+            columns.append((col, "numeric"))
+
+    return data, columns, label_aliases
 
 
 def _extract_nested_table(view, root, leaves, sample_ids):
@@ -336,7 +477,7 @@ class DuckDBAnalyticsPanel(foo.Panel):
 
         # --- samples table ---
         top_fields = list(_top_level_scalar_fields(schema, list_roots))
-        samples_data, samples_cols = _extract_top_table(
+        samples_data, samples_cols, label_aliases = _extract_top_table(
             view, top_fields, list_roots, schema
         )
         tables = {"samples": samples_data}
@@ -363,12 +504,66 @@ class DuckDBAnalyticsPanel(foo.Panel):
                 "categorical": [c for c, k in cols if k == "categorical"],
             }
 
+        # --- virtual labels table (Phase 3) ---
+        # UNION of every label-bearing nested table with a ``source``
+        # discriminator. Sources that don't carry a particular column
+        # (e.g. classifications have no bbox) emit NULL for it. Lets the
+        # frontend express GT-vs-pred and other cross-source questions
+        # as one-line GROUP BYs without manual joins.
+        label_roots = _label_bearing_roots(schema)
+        label_bearing_sources: list = []
+        labels_data = {
+            "sample_id": [], "source": [], "label": [],
+            "confidence": [],
+            "bbox_x": [], "bbox_y": [], "bbox_w": [], "bbox_h": [],
+            "bbox_area": [], "bbox_cx": [], "bbox_cy": [],
+        }
+        for root in label_roots:
+            src = _safe_name(root)
+            t = tables.get(src)
+            if not t or not t.get("sample_id"):
+                continue
+            n = len(t["sample_id"])
+            labels_bearing_label_col = t.get("label", [None] * n)
+            labels_data["sample_id"].extend(t["sample_id"])
+            labels_data["source"].extend([src] * n)
+            labels_data["label"].extend(labels_bearing_label_col)
+            for col in ("confidence",
+                        "bbox_x", "bbox_y", "bbox_w", "bbox_h",
+                        "bbox_area", "bbox_cx", "bbox_cy"):
+                labels_data[col].extend(t.get(col, [None] * n))
+            label_bearing_sources.append(src)
+
+        if labels_data["sample_id"]:
+            tables["labels"] = labels_data
+            tables_info["labels"] = {
+                "numeric": ["confidence",
+                            "bbox_x", "bbox_y", "bbox_w", "bbox_h",
+                            "bbox_area", "bbox_cx", "bbox_cy"],
+                "categorical": ["sample_id", "source", "label"],
+            }
+
         ctx.panel.set_data("tables", tables)
         ctx.panel.set_data("field_info", {
             "tables": tables_info,
             "sample_count": len(view),
             "dataset_name": ctx.dataset.name,
+            "label_class_aliases": label_aliases,
+            "label_bearing_sources": label_bearing_sources,
         })
+
+    def select_samples(self, ctx):
+        """Filter the FiftyOne App's grid to the given sample ids.
+
+        Called by the React panel when a chart-selection gesture resolves to
+        a list of sample ids. Empty list clears any active view.
+        """
+        ids = ctx.params.get("ids") or []
+        if not ids:
+            ctx.ops.clear_view()
+            return
+        view = ctx.dataset.select(ids, ordered=False)
+        ctx.ops.set_view(view=view)
 
     def render(self, ctx):
         panel = types.Object()
@@ -377,6 +572,7 @@ class DuckDBAnalyticsPanel(foo.Panel):
             view=types.View(
                 component="DuckDBAnalyticsView",
                 composite_view=True,
+                select_samples=self.select_samples,
             ),
         )
 

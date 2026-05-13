@@ -23,8 +23,19 @@ declare module "@fiftyone/spaces" {
     local?: boolean,
     scope?: string,
   ): [T, (v: T) => void];
+  export function usePanelId(): string;
 }
 
 declare module "@fiftyone/operators" {
-  export function useTriggerPanelEvent(): (event: any, params?: any) => void;
+  /**
+   * Returns a callback ``trigger(eventUri, params?)`` to invoke a Python
+   * panel event handler from JS. Used by Phase 7 to call ``select_samples``
+   * after a chart selection.
+   */
+  export function useTriggerPanelEvent(): (
+    event: string,
+    params?: Record<string, any>,
+    prompt?: boolean,
+    callback?: (result: any) => void,
+  ) => void;
 }
