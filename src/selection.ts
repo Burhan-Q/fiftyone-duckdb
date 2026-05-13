@@ -10,7 +10,6 @@
  */
 import { useCallback, useRef } from "react";
 import { useTriggerPanelEvent } from "@fiftyone/operators";
-import { usePanelId } from "@fiftyone/spaces";
 
 const q = (name: string) => `"${name.replace(/"/g, '""')}"`;
 const esc = (v: string) => v.replace(/'/g, "''");
@@ -121,11 +120,11 @@ export function useSelectionDispatcher({
   selectSamplesOp,
 }: UseSelectionDispatcherOpts) {
   const triggerEvent = useTriggerPanelEvent();
-  const panelId = usePanelId();
   const inflightRef = useRef(0);
 
   return useCallback(
     async (criteria: SelectionCriteria) => {
+      if (!selectSamplesOp) return;
       const token = ++inflightRef.current;
       let ids: string[];
       if (criteria.kind === "row_ids") {
@@ -145,11 +144,9 @@ export function useSelectionDispatcher({
         }
       }
       if (token !== inflightRef.current) return;
-      triggerEvent(panelId, {
-        operator: selectSamplesOp,
-        params: { ids },
-      });
+      // useTriggerPanelEvent(event, params) — the URI is the first arg.
+      triggerEvent(selectSamplesOp, { ids });
     },
-    [runQuery, triggerEvent, panelId, selectSamplesOp],
+    [runQuery, triggerEvent, selectSamplesOp],
   );
 }

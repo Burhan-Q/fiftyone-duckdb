@@ -28,11 +28,14 @@ declare module "@fiftyone/spaces" {
 
 declare module "@fiftyone/operators" {
   /**
-   * Returns a callback to trigger a Python-side panel event handler from JS.
-   * Used by Phase 7 to invoke ``select_samples`` after a chart selection.
+   * Returns a callback ``trigger(eventUri, params?)`` to invoke a Python
+   * panel event handler from JS. Used by Phase 7 to call ``select_samples``
+   * after a chart selection.
    */
   export function useTriggerPanelEvent(): (
-    panelId: string,
-    options: { operator: any; params?: Record<string, any>; callback?: (result: any) => void },
+    event: string,
+    params?: Record<string, any>,
+    prompt?: boolean,
+    callback?: (result: any) => void,
   ) => void;
 }

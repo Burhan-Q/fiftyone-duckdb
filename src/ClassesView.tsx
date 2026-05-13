@@ -358,52 +358,66 @@ export function ClassesView(props: ClassesViewProps) {
       </div>
     );
   } else if (subview === "distribution") {
-    resultArea = (
-      <BarChart
-        x={(result as any[]).map((r) => String(r.label))}
-        y={(result as any[]).map((r) => Number(r.n))}
-        xLabel="label"
-        yLabel="count"
-        onSelectBar={
-          onSelect
-            ? (label) =>
-                onSelect({
-                  kind: "labels",
-                  sources: distSources,
-                  labels: [label],
-                })
-            : undefined
-        }
-      />
-    );
+    // Shape guard: result might briefly be the previous sub-view's value
+    // before useEffect([subview]) clears it.
+    if (!Array.isArray(result)) {
+      resultArea = null;
+    } else {
+      resultArea = (
+        <BarChart
+          x={result.map((r: any) => String(r.label))}
+          y={result.map((r: any) => Number(r.n))}
+          xLabel="label"
+          yLabel="count"
+          onSelectBar={
+            onSelect
+              ? (label) =>
+                  onSelect({
+                    kind: "labels",
+                    sources: distSources,
+                    labels: [label],
+                  })
+              : undefined
+          }
+        />
+      );
+    }
   } else if (subview === "gt_vs_pred") {
-    resultArea = (
-      <BarChart
-        x={(result as any).labels}
-        y={(result as any).gt}
-        xLabel="label"
-        yLabel="count"
-        groups={[
-          { name: gtSrc, y: (result as any).gt },
-          { name: predSrc, y: (result as any).pred },
-        ]}
-        onSelectBar={
-          onSelect
-            ? (label) =>
-                onSelect({
-                  kind: "labels",
-                  sources: [gtSrc, predSrc].filter(Boolean),
-                  labels: [label],
-                })
-            : undefined
-        }
-      />
-    );
+    const r = result as any;
+    if (!r || !Array.isArray(r.labels) || !Array.isArray(r.gt) || !Array.isArray(r.pred)) {
+      resultArea = null;
+    } else {
+      resultArea = (
+        <BarChart
+          x={r.labels}
+          y={r.gt}
+          xLabel="label"
+          yLabel="count"
+          groups={[
+            { name: gtSrc, y: r.gt },
+            { name: predSrc, y: r.pred },
+          ]}
+          onSelectBar={
+            onSelect
+              ? (label) =>
+                  onSelect({
+                    kind: "labels",
+                    sources: [gtSrc, predSrc].filter(Boolean),
+                    labels: [label],
+                  })
+              : undefined
+          }
+        />
+      );
+    }
   } else if (subview === "spatial") {
+    if (!Array.isArray(result)) {
+      resultArea = null;
+    } else {
     resultArea = (
       <Heatmap2DChart
-        x={(result as any[]).map((r) => Number(r.bbox_cx))}
-        y={(result as any[]).map((r) => Number(r.bbox_cy))}
+        x={result.map((r: any) => Number(r.bbox_cx))}
+        y={result.map((r: any) => Number(r.bbox_cy))}
         xLabel="bbox_cx"
         yLabel="bbox_cy"
         onSelectRegion={
@@ -424,7 +438,11 @@ export function ClassesView(props: ClassesViewProps) {
         }
       />
     );
+    }
   } else if (subview === "confidence") {
+    if (!Array.isArray(result)) {
+      resultArea = null;
+    } else {
     resultArea = (
       <GroupByChart
         groups={result as any}
@@ -443,6 +461,7 @@ export function ClassesView(props: ClassesViewProps) {
         }
       />
     );
+    }
   } else if (subview === "cooccurrence") {
     if (!(result as any).labels?.length) {
       resultArea = (
