@@ -353,15 +353,27 @@ export function DuckDBAnalyticsPanel(props: { schema?: any } = {}) {
     }
   }, [tableNames.join("|")]);
 
-  // Reset selections when active table / dataset changes
+  // Drop selections that no longer exist in the new schema; keep the rest.
+  // Reset ephemeral results / errors unconditionally so the next query
+  // fires. The dep array reads from `numeric` / `categorical` instead of
+  // sample_count so a view filter (which changes sample_count but not the
+  // schema) does NOT trip this effect.
   useEffect(() => {
-    setMulti([]);
-    setSingle("");
-    setSingle2("");
-    setColorBy("");
+    const validMulti = multi.filter((m) => numeric.includes(m));
+    if (validMulti.length !== multi.length) setMulti(validMulti);
+    if (single && !numeric.includes(single)) setSingle("");
+    if (
+      single2
+      && !numeric.includes(single2)
+      && !categorical.includes(single2)
+    ) {
+      setSingle2("");
+    }
+    if (colorBy && !categorical.includes(colorBy)) setColorBy("");
     setResults(null);
     setQueryError(null);
-  }, [tableName, fieldInfo?.dataset_name, fieldInfo?.sample_count]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableName, numeric.join("|"), categorical.join("|")]);
 
   // Clear stale results when analysis switches so we never feed
   // old-shape results to a different chart component.
