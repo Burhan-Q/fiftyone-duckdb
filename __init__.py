@@ -469,9 +469,28 @@ class DuckDBAnalyticsPanel(foo.Panel):
                 "dataset_name": None,
                 "error": "No dataset loaded",
             })
+            ctx.panel.set_state("_push_sig", None)
             return
 
+        # Idempotency guard: FiftyOne fires ``on_load`` (and often
+        # ``on_change_view``) on every panel re-mount, e.g. when the user
+        # switches sibling panel tabs and returns. Without this guard each
+        # re-mount re-runs the (expensive) field extraction below and pushes
+        # fresh ``tables`` / ``field_info`` references to the JS atom, which
+        # causes ``useDuckDB`` to re-ingest every table and the query effects
+        # to re-fire — visible as the chart flashing and multiple
+        # ``/operators/execute`` calls in the network panel.
         view = ctx.view if ctx.view is not None else ctx.dataset
+        view_stages = (
+            [s._serialize() for s in view._stages]
+            if getattr(view, "_stages", None)
+            else []
+        )
+        sig = [ctx.dataset.name, view_stages, len(view)]
+        if ctx.panel.get_state("_push_sig") == sig:
+            return
+        ctx.panel.set_state("_push_sig", sig)
+
         schema = ctx.dataset.get_field_schema(flat=True)
         list_roots = _list_doc_roots(schema)
 
