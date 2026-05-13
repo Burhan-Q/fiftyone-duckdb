@@ -268,7 +268,7 @@ function SingleField({
 export function DuckDBAnalyticsPanel(props: { schema?: any } = {}) {
   // The composite-view receives `schema.view.<kwarg>` for each kwarg passed to
   // ``types.View(...)`` in Python's ``render()``. We use this to obtain the
-  // URI of the ``select_samples`` event handler for Phase 7 dispatching.
+  // URI of the ``select_samples`` event handler for chart-to-view dispatch.
   const selectSamplesOp = props?.schema?.view?.select_samples;
   const [panelData] = usePanelStatePartial<{
     tables?: Tables;

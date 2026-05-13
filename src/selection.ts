@@ -109,6 +109,19 @@ export function criteriaToSampleIdSql(c: SelectionCriteria): string | null {
  *   result is shipped to Python (older in-flight queries are discarded).
  * - Resolves to an empty id list → triggers ``clear_view`` on the Python
  *   side via the same handler.
+ *
+ * **Why an operator dispatch instead of writing ``fos.extendedSelection``
+ * directly** (as the Embeddings panel does): the ``extendedSelection``
+ * atom is a ``graphQLSyncFragmentAtom`` whose ``read`` callback returns
+ * a closure-scoped ``current`` that is **never updated by user writes**.
+ * Any GraphQL refetch of the dataset fragment (which our panel triggers
+ * via ``on_change_view`` operator round-trips) causes ``setSelf(read(...))``
+ * to overwrite the manual write with the stale closure value, clearing
+ * the selection within ~200 ms. Embeddings doesn't hit this because the
+ * panel is JS-only (no Python lifecycle handlers → no refetch). Until
+ * the atom is fixed upstream, the operator-based ``set_view`` path is
+ * the only reliable way to filter the grid from a chart click in a
+ * hybrid panel.
  */
 export interface UseSelectionDispatcherOpts {
   runQuery: <T = any>(sql: string) => Promise<T[]>;
