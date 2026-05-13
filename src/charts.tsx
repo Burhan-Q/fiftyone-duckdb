@@ -348,7 +348,9 @@ export function GroupByChart({
         type: "bar",
         x: groups.map((g) => g.group),
         y: groups.map((g) => {
-          const vals = g.values.map((v) => num(v) ?? 0);
+          const vals = Array.isArray(g.values)
+            ? g.values.map((v) => num(v) ?? 0)
+            : [];
           if (vals.length === 0) return 0;
           return vals.reduce((a, b) => a + b, 0) / vals.length;
         }),
@@ -360,7 +362,7 @@ export function GroupByChart({
     traces = groups.map((g) => ({
       type: "violin",
       name: g.group,
-      y: g.values.map((v) => num(v) ?? 0),
+      y: Array.isArray(g.values) ? g.values.map((v) => num(v) ?? 0) : [],
       points: "outliers",
       box: { visible: true },
       meanline: { visible: true },
@@ -369,7 +371,7 @@ export function GroupByChart({
     traces = groups.map((g) => ({
       type: "box",
       name: g.group,
-      y: g.values.map((v) => num(v) ?? 0),
+      y: Array.isArray(g.values) ? g.values.map((v) => num(v) ?? 0) : [],
       boxpoints: "outliers",
     }));
   }
