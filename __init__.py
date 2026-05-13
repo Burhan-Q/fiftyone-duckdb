@@ -24,6 +24,12 @@ SKIP_TOP = ("_id", "tags")  # 'id' kept for joining to nested tables
 # Hard cap so a weird schema can't blow up DuckDB or the wire payload.
 MAX_COLS_PER_TABLE = 256
 
+# Per-class count columns on the samples table are capped to keep widths sane.
+# Top-K classes by global frequency get dedicated columns; the rest roll up
+# into a single ``_label_count_other`` column.
+TOP_K_LABEL_COLUMNS = 30
+LABEL_LEAF_NAME = "label"
+
 
 def _kind_for(field):
     """Return ``"numeric"`` / ``"categorical"`` / ``None`` for a Field."""
@@ -46,6 +52,66 @@ def _list_doc_roots(schema):
         if isinstance(field, fo.ListField)
         and isinstance(field.field, fo.EmbeddedDocumentField)
     ]
+
+
+def _label_bearing_roots(schema):
+    """List-of-doc roots whose embedded schema has a ``label`` StringField."""
+    out = []
+    for root in _list_doc_roots(schema):
+        leaf = f"{root}.{LABEL_LEAF_NAME}"
+        field = schema.get(leaf)
+        if isinstance(field, fo.StringField):
+            out.append(root)
+    return out
+
+
+def _top_classes_for_root(view_or_dataset, root, k=TOP_K_LABEL_COLUMNS):
+    """Return ``(top_k, rest)`` lists of ``(class, count)`` pairs.
+
+    ``top_k`` holds the up-to-``k`` most frequent classes (count-desc, then
+    alphabetical for stability); ``rest`` is everything beyond that.
+    """
+    counts = view_or_dataset.count_values(f"{root}.{LABEL_LEAF_NAME}") or {}
+    pairs = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return pairs[:k], pairs[k:]
+
+
+def _safe_class(name):
+    """Slugify a class name to a DuckDB-friendly identifier.
+
+    Lowercases, replaces any non-``[a-z0-9_]`` run with ``_``, and trims
+    leading/trailing underscores. Always returns a non-empty string
+    (falls back to a hex digest of the input when the slug would be empty,
+    e.g. for non-Latin scripts).
+    """
+    import hashlib
+    import re
+
+    s = re.sub(r"[^a-z0-9_]+", "_", str(name).lower()).strip("_")
+    if not s:
+        s = "c_" + hashlib.md5(str(name).encode("utf-8")).hexdigest()[:8]
+    return s
+
+
+def _build_class_alias_map(classes):
+    """Map each original class name → DuckDB-safe slug, disambiguating clashes.
+
+    Iteration is order-preserving so callers can pass an ordered list and
+    get stable slugs. When two distinct inputs would slugify to the same
+    string, later entries get a numeric suffix (``_1``, ``_2``, ...).
+    """
+    aliases = {}
+    used = set()
+    for name in classes:
+        base = _safe_class(name)
+        slug = base
+        i = 1
+        while slug in used:
+            slug = f"{base}_{i}"
+            i += 1
+        used.add(slug)
+        aliases[name] = slug
+    return aliases
 
 
 def _top_level_scalar_fields(schema, list_roots):
