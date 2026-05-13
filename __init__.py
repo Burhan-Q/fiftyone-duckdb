@@ -504,12 +504,52 @@ class DuckDBAnalyticsPanel(foo.Panel):
                 "categorical": [c for c, k in cols if k == "categorical"],
             }
 
+        # --- virtual labels table (Phase 3) ---
+        # UNION of every label-bearing nested table with a ``source``
+        # discriminator. Sources that don't carry a particular column
+        # (e.g. classifications have no bbox) emit NULL for it. Lets the
+        # frontend express GT-vs-pred and other cross-source questions
+        # as one-line GROUP BYs without manual joins.
+        label_roots = _label_bearing_roots(schema)
+        label_bearing_sources: list = []
+        labels_data = {
+            "sample_id": [], "source": [], "label": [],
+            "confidence": [],
+            "bbox_x": [], "bbox_y": [], "bbox_w": [], "bbox_h": [],
+            "bbox_area": [], "bbox_cx": [], "bbox_cy": [],
+        }
+        for root in label_roots:
+            src = _safe_name(root)
+            t = tables.get(src)
+            if not t or not t.get("sample_id"):
+                continue
+            n = len(t["sample_id"])
+            labels_bearing_label_col = t.get("label", [None] * n)
+            labels_data["sample_id"].extend(t["sample_id"])
+            labels_data["source"].extend([src] * n)
+            labels_data["label"].extend(labels_bearing_label_col)
+            for col in ("confidence",
+                        "bbox_x", "bbox_y", "bbox_w", "bbox_h",
+                        "bbox_area", "bbox_cx", "bbox_cy"):
+                labels_data[col].extend(t.get(col, [None] * n))
+            label_bearing_sources.append(src)
+
+        if labels_data["sample_id"]:
+            tables["labels"] = labels_data
+            tables_info["labels"] = {
+                "numeric": ["confidence",
+                            "bbox_x", "bbox_y", "bbox_w", "bbox_h",
+                            "bbox_area", "bbox_cx", "bbox_cy"],
+                "categorical": ["sample_id", "source", "label"],
+            }
+
         ctx.panel.set_data("tables", tables)
         ctx.panel.set_data("field_info", {
             "tables": tables_info,
             "sample_count": len(view),
             "dataset_name": ctx.dataset.name,
             "label_class_aliases": label_aliases,
+            "label_bearing_sources": label_bearing_sources,
         })
 
     def render(self, ctx):
