@@ -35,8 +35,10 @@ import {
   TableInfo,
   useDuckDB,
 } from "./useDuckDB";
+import { ClassesView } from "./ClassesView";
 
 type Analysis =
+  | "classes"
   | "stats"
   | "histogram"
   | "correlation"
@@ -46,6 +48,7 @@ type Analysis =
   | "missing";
 
 const ANALYSES: { id: Analysis; label: string }[] = [
+  { id: "classes", label: "Classes" },
   { id: "stats", label: "Stats" },
   { id: "histogram", label: "Histogram" },
   { id: "correlation", label: "Correlation" },
@@ -329,6 +332,8 @@ export function DuckDBAnalyticsPanel() {
   useEffect(() => {
     if (!ready || !tableName) return;
     if (!loadedTables.includes(tableName)) return;
+    // Classes tab runs its own queries against the virtual `labels` table.
+    if (analysis === "classes") return;
     let sql: string | null = null;
     let postProcess: (rows: any[]) => any = (rows) => rows;
 
@@ -748,7 +753,7 @@ export function DuckDBAnalyticsPanel() {
   if (fieldInfo?.error) {
     return (
       <div style={{ padding: 16 }}>
-        <Toast open variant={Variant.Default} description={fieldInfo.error} />
+        <Toast open variant={Variant.Secondary} description={fieldInfo.error} />
       </div>
     );
   }
@@ -757,7 +762,7 @@ export function DuckDBAnalyticsPanel() {
       <div style={{ padding: 16 }}>
         <Toast
           open
-          variant={Variant.Default}
+          variant={Variant.Secondary}
           description="No analyzable scalar fields found in the current view."
         />
       </div>
@@ -766,7 +771,16 @@ export function DuckDBAnalyticsPanel() {
 
   // ToggleSwitch renders the active tab's content; we share one body across
   // all tabs whose contents depend on the current ``analysis`` state.
-  const tabBody = (
+  // The Classes tab is special: it owns its own controls + queries and
+  // operates on the virtual `labels` table, so it short-circuits.
+  const tabBody = analysis === "classes" ? (
+    <ClassesView
+      ready={ready}
+      loadedTables={loadedTables}
+      fieldInfo={fieldInfo}
+      runQuery={runQuery}
+    />
+  ) : (
     <Stack
       orientation={Orientation.Column}
       spacing={Spacing.Md}

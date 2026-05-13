@@ -355,6 +355,111 @@ export function MissingTable({ rows }: { rows: MissingRow[] }) {
   );
 }
 
+// ---------- Bar chart (simple + grouped) ----------
+export function BarChart({
+  x,
+  y,
+  xLabel,
+  yLabel,
+  groups,
+}: {
+  x: string[];
+  y: number[];
+  xLabel: string;
+  yLabel: string;
+  /** When provided, renders grouped bars (one trace per group) instead of a single trace. */
+  groups?: Array<{ name: string; y: number[] }>;
+}) {
+  if (!x.length) {
+    return <EmptyChart message="No values to plot" />;
+  }
+  const traces: any[] = groups && groups.length > 0
+    ? groups.map((g, i) => ({
+        type: "bar",
+        name: g.name,
+        x,
+        y: g.y.map((v) => num(v) ?? 0),
+        marker: { color: i === 0 ? ORANGE : "#4ea1ff" },
+        hovertemplate: `${g.name}<br>%{x}: %{y}<extra></extra>`,
+      }))
+    : [{
+        type: "bar",
+        x,
+        y: y.map((v) => num(v) ?? 0),
+        marker: { color: ORANGE },
+        hovertemplate: `%{x}: %{y}<extra></extra>`,
+      }];
+  return (
+    <Plot
+      data={traces}
+      layout={{
+        ...COMMON_LAYOUT,
+        barmode: groups ? "group" : undefined,
+        bargap: 0.15,
+        xaxis: { title: { text: xLabel }, automargin: true, tickangle: -30 },
+        yaxis: { title: { text: yLabel }, rangemode: "tozero" },
+        showlegend: !!groups,
+        legend: { orientation: "h", y: 1.15 },
+      }}
+      config={COMMON_CONFIG}
+      style={{ width: "100%", height: "100%" }}
+      useResizeHandler
+    />
+  );
+}
+
+// ---------- 2-D heatmap (Spatial class-conditional density) ----------
+export function Heatmap2DChart({
+  x,
+  y,
+  xLabel,
+  yLabel,
+  nBins = 30,
+}: {
+  x: number[];
+  y: number[];
+  xLabel: string;
+  yLabel: string;
+  nBins?: number;
+}) {
+  const xs = x.map((v) => num(v)).filter((v): v is number => v !== null);
+  const ys = y.map((v) => num(v)).filter((v): v is number => v !== null);
+  if (xs.length === 0) {
+    return <EmptyChart message="No spatial data for this class" />;
+  }
+  return (
+    <Plot
+      data={[
+        {
+          type: "histogram2d",
+          x: xs,
+          y: ys,
+          nbinsx: nBins,
+          nbinsy: nBins,
+          colorscale: "Hot",
+          reversescale: true,
+          hovertemplate: `${xLabel}: %{x:.3f}<br>${yLabel}: %{y:.3f}<br>count: %{z}<extra></extra>`,
+        } as any,
+      ]}
+      layout={{
+        ...COMMON_LAYOUT,
+        // Image coordinates: origin top-left so the heatmap reads like an
+        // image overlay (bbox_cy = 0 is the top of the image).
+        xaxis: { title: { text: xLabel }, range: [0, 1], constrain: "domain" } as any,
+        yaxis: {
+          title: { text: yLabel },
+          range: [1, 0],
+          scaleanchor: "x",
+          scaleratio: 1,
+        } as any,
+      }}
+      config={COMMON_CONFIG}
+      style={{ width: "100%", height: "100%" }}
+      useResizeHandler
+    />
+  );
+}
+
 // ---------- Helpers ----------
 function EmptyChart({ message }: { message: string }) {
   return (

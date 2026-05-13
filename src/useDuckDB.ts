@@ -12,6 +12,10 @@ export type FieldInfo = {
   sample_count: number;
   dataset_name: string | null;
   error?: string;
+  /** Map of {root_safe: {original_class: slug}} — for prettifying labels in UI. */
+  label_class_aliases?: Record<string, Record<string, string>>;
+  /** Safe-named sources that appear in the virtual `labels` table. */
+  label_bearing_sources?: string[];
 };
 
 export type ColumnarTable = Record<string, (number | string | boolean | null)[]>;
