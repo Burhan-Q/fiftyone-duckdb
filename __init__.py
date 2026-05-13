@@ -552,6 +552,19 @@ class DuckDBAnalyticsPanel(foo.Panel):
             "label_bearing_sources": label_bearing_sources,
         })
 
+    def select_samples(self, ctx):
+        """Filter the FiftyOne App's grid to the given sample ids.
+
+        Called by the React panel when a chart-selection gesture resolves to
+        a list of sample ids. Empty list clears any active view.
+        """
+        ids = ctx.params.get("ids") or []
+        if not ids:
+            ctx.ops.clear_view()
+            return
+        view = ctx.dataset.select(ids, ordered=False)
+        ctx.ops.set_view(view=view)
+
     def render(self, ctx):
         panel = types.Object()
         return types.Property(
@@ -559,6 +572,7 @@ class DuckDBAnalyticsPanel(foo.Panel):
             view=types.View(
                 component="DuckDBAnalyticsView",
                 composite_view=True,
+                select_samples=self.select_samples,
             ),
         )
 

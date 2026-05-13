@@ -21,6 +21,7 @@ import {
   BarChart,
 } from "./charts";
 import { FieldInfo } from "./useDuckDB";
+import { SelectionCriteria } from "./selection";
 
 type Subview =
   | "distribution"
@@ -117,13 +118,15 @@ export interface ClassesViewProps {
   loadedTables: string[];
   fieldInfo: FieldInfo | null;
   runQuery: <T = any>(sql: string) => Promise<T[]>;
+  /** Chart-to-view-selection dispatcher (Phase 7). */
+  onSelect?: (criteria: SelectionCriteria) => void;
 }
 
 const toOpts = (xs: string[]) =>
   xs.map((x) => ({ id: x, data: { label: x } }));
 
 export function ClassesView(props: ClassesViewProps) {
-  const { ready, loadedTables, fieldInfo, runQuery } = props;
+  const { ready, loadedTables, fieldInfo, runQuery, onSelect } = props;
 
   const sources = fieldInfo?.label_bearing_sources ?? [];
   const labelsLoaded = loadedTables.includes("labels");
@@ -361,6 +364,16 @@ export function ClassesView(props: ClassesViewProps) {
         y={(result as any[]).map((r) => Number(r.n))}
         xLabel="label"
         yLabel="count"
+        onSelectBar={
+          onSelect
+            ? (label) =>
+                onSelect({
+                  kind: "labels",
+                  sources: distSources,
+                  labels: [label],
+                })
+            : undefined
+        }
       />
     );
   } else if (subview === "gt_vs_pred") {
@@ -374,6 +387,16 @@ export function ClassesView(props: ClassesViewProps) {
           { name: gtSrc, y: (result as any).gt },
           { name: predSrc, y: (result as any).pred },
         ]}
+        onSelectBar={
+          onSelect
+            ? (label) =>
+                onSelect({
+                  kind: "labels",
+                  sources: [gtSrc, predSrc].filter(Boolean),
+                  labels: [label],
+                })
+            : undefined
+        }
       />
     );
   } else if (subview === "spatial") {
@@ -383,6 +406,22 @@ export function ClassesView(props: ClassesViewProps) {
         y={(result as any[]).map((r) => Number(r.bbox_cy))}
         xLabel="bbox_cx"
         yLabel="bbox_cy"
+        onSelectRegion={
+          onSelect
+            ? (region) => {
+                if (!region) {
+                  onSelect({ kind: "row_ids", sampleIds: [] });
+                  return;
+                }
+                onSelect({
+                  kind: "labels",
+                  sources: [spatialSrc],
+                  labels: [spatialClass],
+                  bbox: region,
+                });
+              }
+            : undefined
+        }
       />
     );
   } else if (subview === "confidence") {
@@ -392,6 +431,16 @@ export function ClassesView(props: ClassesViewProps) {
         groupLabel="class"
         valueLabel="confidence"
         variant="box"
+        onSelectGroup={
+          onSelect
+            ? (g) =>
+                onSelect({
+                  kind: "labels",
+                  sources: [confSrc],
+                  labels: [g],
+                })
+            : undefined
+        }
       />
     );
   } else if (subview === "cooccurrence") {
@@ -407,6 +456,17 @@ export function ClassesView(props: ClassesViewProps) {
         <HeatmapChart
           matrix={(result as any).matrix}
           labels={(result as any).labels}
+          onSelectCell={
+            onSelect
+              ? (cell) =>
+                  onSelect({
+                    kind: "labels_cooccur",
+                    source: coocSrc,
+                    labelA: cell.row,
+                    labelB: cell.col,
+                  })
+              : undefined
+          }
         />
       );
     }

@@ -36,6 +36,7 @@ import {
   useDuckDB,
 } from "./useDuckDB";
 import { ClassesView } from "./ClassesView";
+import { useSelectionDispatcher, SelectionCriteria } from "./selection";
 
 type Analysis =
   | "classes"
@@ -59,6 +60,9 @@ const ANALYSES: { id: Analysis; label: string }[] = [
 ];
 
 const q = (name: string) => `"${name.replace(/"/g, '""')}"`;
+
+/** The samples FK column for ``table`` (``id`` for ``samples``, else ``sample_id``). */
+const sampleIdCol = (table: string) => (table === "samples" ? "id" : "sample_id");
 
 // ---------- SQL generators ----------
 
@@ -125,11 +129,13 @@ function outlierSQL(
   method: "z" | "iqr",
   threshold: number,
 ): string {
+  const sid = q(sampleIdCol(table));
   if (method === "z") {
     return `SELECT row_number() OVER () AS idx,
               ${q(field)}::DOUBLE AS value,
               ((${q(field)}::DOUBLE - AVG(${q(field)}::DOUBLE) OVER())
-                / NULLIF(STDDEV_POP(${q(field)}::DOUBLE) OVER(), 0)) AS z_score
+                / NULLIF(STDDEV_POP(${q(field)}::DOUBLE) OVER(), 0)) AS z_score,
+              ${sid} AS sample_id
         FROM ${q(table)} WHERE ${q(field)} IS NOT NULL`;
   }
   return `WITH q AS (
@@ -141,7 +147,8 @@ function outlierSQL(
          ${q(field)}::DOUBLE AS value,
          (q3 - q1) AS iqr,
          q1 - ${threshold} * (q3 - q1) AS lo_bound,
-         q3 + ${threshold} * (q3 - q1) AS hi_bound
+         q3 + ${threshold} * (q3 - q1) AS hi_bound,
+         ${sid} AS sample_id
   FROM ${q(table)}, q WHERE ${q(field)} IS NOT NULL`;
 }
 
@@ -151,7 +158,11 @@ function scatterSQL(
   y: string,
   color?: string,
 ): string {
-  const cols = [`${q(x)}::DOUBLE AS x`, `${q(y)}::DOUBLE AS y`];
+  const cols = [
+    `${q(x)}::DOUBLE AS x`,
+    `${q(y)}::DOUBLE AS y`,
+    `${q(sampleIdCol(table))} AS sample_id`,
+  ];
   if (color) cols.push(`${q(color)} AS color`);
   return `SELECT ${cols.join(", ")}
     FROM ${q(table)}
@@ -254,7 +265,11 @@ function SingleField({
 
 // ---------- Main component ----------
 
-export function DuckDBAnalyticsPanel() {
+export function DuckDBAnalyticsPanel(props: { schema?: any } = {}) {
+  // The composite-view receives `schema.view.<kwarg>` for each kwarg passed to
+  // ``types.View(...)`` in Python's ``render()``. We use this to obtain the
+  // URI of the ``select_samples`` event handler for Phase 7 dispatching.
+  const selectSamplesOp = props?.schema?.view?.select_samples;
   const [panelData] = usePanelStatePartial<{
     tables?: Tables;
     field_info?: FieldInfo;
@@ -264,6 +279,11 @@ export function DuckDBAnalyticsPanel() {
 
   const { ready, loading, error, runQuery, queryTime, loadedTables } =
     useDuckDB(tables, fieldInfo);
+
+  const dispatchSelection = useSelectionDispatcher({
+    runQuery,
+    selectSamplesOp,
+  });
 
   const tableNames = useMemo(() => {
     if (!fieldInfo?.tables) return [];
@@ -663,6 +683,18 @@ export function DuckDBAnalyticsPanel() {
             counts={counts}
             field={single}
             variant={histVariant}
+            onSelectBin={
+              selectSamplesOp
+                ? (range) =>
+                    dispatchSelection({
+                      kind: "range",
+                      table: tableName,
+                      field: single,
+                      min: range.min,
+                      max: range.max,
+                    })
+                : undefined
+            }
           />
         );
       }
@@ -677,8 +709,24 @@ export function DuckDBAnalyticsPanel() {
           x: Number(r.idx),
           y: Number(r.value),
         }));
+        const sampleIds = results.map((r: any) => r.sample_id);
         return (
-          <ScatterChart points={points} xLabel="row index" yLabel={single} />
+          <ScatterChart
+            points={points}
+            xLabel="row index"
+            yLabel={single}
+            onSelectIndices={
+              selectSamplesOp
+                ? (idxs) =>
+                    dispatchSelection({
+                      kind: "row_ids",
+                      sampleIds: idxs
+                        .map((i) => sampleIds[i])
+                        .filter(Boolean),
+                    })
+                : undefined
+            }
+          />
         );
       }
       case "scatter": {
@@ -689,12 +737,24 @@ export function DuckDBAnalyticsPanel() {
           y: Number(r.y),
           ...(hasColor ? { group: r.color ?? null } : {}),
         }));
+        const sampleIds = results.map((r: any) => r.sample_id);
         return (
           <ScatterChart
             points={points}
             xLabel={single}
             yLabel={single2}
             colorLabel={colorBy || undefined}
+            onSelectIndices={
+              selectSamplesOp
+                ? (idxs) =>
+                    dispatchSelection({
+                      kind: "row_ids",
+                      sampleIds: idxs
+                        .map((i) => sampleIds[i])
+                        .filter(Boolean),
+                    })
+                : undefined
+            }
           />
         );
       }
@@ -706,6 +766,17 @@ export function DuckDBAnalyticsPanel() {
             groupLabel={single2}
             valueLabel={single}
             variant={groupVariant}
+            onSelectGroup={
+              selectSamplesOp
+                ? (g) =>
+                    dispatchSelection({
+                      kind: "values",
+                      table: tableName,
+                      field: single2,
+                      values: [g],
+                    })
+                : undefined
+            }
           />
         );
       case "missing":
@@ -722,6 +793,9 @@ export function DuckDBAnalyticsPanel() {
     colorBy,
     histVariant,
     groupVariant,
+    tableName,
+    selectSamplesOp,
+    dispatchSelection,
   ]);
 
   // ---------- Top-level shell ----------
@@ -779,6 +853,7 @@ export function DuckDBAnalyticsPanel() {
       loadedTables={loadedTables}
       fieldInfo={fieldInfo}
       runQuery={runQuery}
+      onSelect={selectSamplesOp ? dispatchSelection : undefined}
     />
   ) : (
     <Stack
