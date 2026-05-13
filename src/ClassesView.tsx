@@ -374,40 +374,46 @@ export function ClassesView(props: ClassesViewProps) {
   });
 
   // ----- Result area -----
-  let resultArea: React.ReactNode = null;
-  if (querying) {
-    resultArea = (
-      <Stack
-        align={"center" as any}
-        justify={"center" as any}
-        style={{ flex: 1 }}
-      >
-        <Spinner size={Size.Md} />
-      </Stack>
-    );
-  } else if (queryError) {
-    resultArea = (
-      <Toast open variant={Variant.Danger} title="Query failed" description={queryError} />
-    );
-  } else if (!result) {
-    resultArea = (
-      <div
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "center",
-          height: "100%", padding: 32,
-          color: "var(--fo-palette-text-secondary, #888)",
-        }}
-      >
-        Pick options to run an analysis.
-      </div>
-    );
-  } else if (subview === "distribution") {
-    // Shape guard: result might briefly be the previous sub-view's value
-    // before useEffect([subview]) clears it.
-    if (!Array.isArray(result)) {
-      resultArea = null;
-    } else {
-      resultArea = (
+  // Memoize the Plotly chart subtree so spurious parent re-renders (e.g.
+  // FiftyOne's spaces stack fires multiple `on_change_view` operator calls
+  // per panel-tab focus return) don't churn react-plotly and produce a
+  // visible chart flash. The chart is only rebuilt when one of its real
+  // inputs actually changes.
+  const resultArea: React.ReactNode = useMemo(() => {
+    if (querying) {
+      return (
+        <Stack
+          align={"center" as any}
+          justify={"center" as any}
+          style={{ flex: 1 }}
+        >
+          <Spinner size={Size.Md} />
+        </Stack>
+      );
+    }
+    if (queryError) {
+      return (
+        <Toast open variant={Variant.Danger} title="Query failed" description={queryError} />
+      );
+    }
+    if (!result) {
+      return (
+        <div
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            height: "100%", padding: 32,
+            color: "var(--fo-palette-text-secondary, #888)",
+          }}
+        >
+          Pick options to run an analysis.
+        </div>
+      );
+    }
+    if (subview === "distribution") {
+      // Shape guard: result might briefly be the previous sub-view's value
+      // before useEffect([subview]) clears it.
+      if (!Array.isArray(result)) return null;
+      return (
         <BarChart
           x={result.map((r: any) => String(r.label))}
           y={result.map((r: any) => Number(r.n))}
@@ -426,12 +432,10 @@ export function ClassesView(props: ClassesViewProps) {
         />
       );
     }
-  } else if (subview === "gt_vs_pred") {
-    const r = result as any;
-    if (!r || !Array.isArray(r.labels) || !Array.isArray(r.gt) || !Array.isArray(r.pred)) {
-      resultArea = null;
-    } else {
-      resultArea = (
+    if (subview === "gt_vs_pred") {
+      const r = result as any;
+      if (!r || !Array.isArray(r.labels) || !Array.isArray(r.gt) || !Array.isArray(r.pred)) return null;
+      return (
         <BarChart
           x={r.labels}
           y={r.gt}
@@ -454,71 +458,67 @@ export function ClassesView(props: ClassesViewProps) {
         />
       );
     }
-  } else if (subview === "spatial") {
-    if (!Array.isArray(result)) {
-      resultArea = null;
-    } else {
-    resultArea = (
-      <Heatmap2DChart
-        x={result.map((r: any) => Number(r.bbox_cx))}
-        y={result.map((r: any) => Number(r.bbox_cy))}
-        xLabel="bbox_cx"
-        yLabel="bbox_cy"
-        onSelectRegion={
-          onSelect
-            ? (region) => {
-                if (!region) {
-                  onSelect({ kind: "row_ids", sampleIds: [] });
-                  return;
+    if (subview === "spatial") {
+      if (!Array.isArray(result)) return null;
+      return (
+        <Heatmap2DChart
+          x={result.map((r: any) => Number(r.bbox_cx))}
+          y={result.map((r: any) => Number(r.bbox_cy))}
+          xLabel="bbox_cx"
+          yLabel="bbox_cy"
+          onSelectRegion={
+            onSelect
+              ? (region) => {
+                  if (!region) {
+                    onSelect({ kind: "row_ids", sampleIds: [] });
+                    return;
+                  }
+                  onSelect({
+                    kind: "labels",
+                    sources: [spatialSrc],
+                    labels: [spatialClass],
+                    bbox: region,
+                  });
                 }
-                onSelect({
-                  kind: "labels",
-                  sources: [spatialSrc],
-                  labels: [spatialClass],
-                  bbox: region,
-                });
-              }
-            : undefined
-        }
-      />
-    );
-    }
-  } else if (subview === "confidence") {
-    const safe =
-      Array.isArray(result)
-      && result.every((r: any) => Array.isArray(r?.values));
-    if (!safe) {
-      resultArea = null;
-    } else {
-    resultArea = (
-      <GroupByChart
-        groups={result as any}
-        groupLabel="class"
-        valueLabel="confidence"
-        variant="box"
-        onSelectGroup={
-          onSelect
-            ? (g) =>
-                onSelect({
-                  kind: "labels",
-                  sources: [confSrc],
-                  labels: [g],
-                })
-            : undefined
-        }
-      />
-    );
-    }
-  } else if (subview === "cooccurrence") {
-    if (!(result as any)?.labels?.length) {
-      resultArea = (
-        <Toast
-          open variant={Variant.Secondary}
-          description="No co-occurring classes found."
+              : undefined
+          }
         />
       );
-    } else {
-      resultArea = (
+    }
+    if (subview === "confidence") {
+      const safe =
+        Array.isArray(result)
+        && result.every((r: any) => Array.isArray(r?.values));
+      if (!safe) return null;
+      return (
+        <GroupByChart
+          groups={result as any}
+          groupLabel="class"
+          valueLabel="confidence"
+          variant="box"
+          onSelectGroup={
+            onSelect
+              ? (g) =>
+                  onSelect({
+                    kind: "labels",
+                    sources: [confSrc],
+                    labels: [g],
+                  })
+              : undefined
+          }
+        />
+      );
+    }
+    if (subview === "cooccurrence") {
+      if (!(result as any)?.labels?.length) {
+        return (
+          <Toast
+            open variant={Variant.Secondary}
+            description="No co-occurring classes found."
+          />
+        );
+      }
+      return (
         <HeatmapChart
           matrix={(result as any).matrix}
           labels={(result as any).labels}
@@ -536,7 +536,21 @@ export function ClassesView(props: ClassesViewProps) {
         />
       );
     }
-  }
+    return null;
+  }, [
+    querying,
+    queryError,
+    result,
+    subview,
+    distSources,
+    gtSrc,
+    predSrc,
+    spatialSrc,
+    spatialClass,
+    confSrc,
+    coocSrc,
+    onSelect,
+  ]);
 
   // ----- Layout -----
   return (
