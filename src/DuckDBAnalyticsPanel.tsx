@@ -294,7 +294,9 @@ export function DuckDBAnalyticsPanel(props: { schema?: any } = {}) {
     });
   }, [fieldInfo?.tables]);
 
-  const [tableName, setTableName] = useState<string>("");
+  const [tableName, setTableName] = usePanelStatePartial<string>(
+    "tableName", "", true,
+  );
   const currentTable: TableInfo = useMemo(() => {
     return (tableName && fieldInfo?.tables?.[tableName]) || {
       numeric: [],
@@ -305,16 +307,36 @@ export function DuckDBAnalyticsPanel(props: { schema?: any } = {}) {
   const numeric = currentTable.numeric;
   const categorical = currentTable.categorical;
 
-  const [analysis, setAnalysis] = useState<Analysis>("stats");
-  const [multi, setMulti] = useState<string[]>([]);
-  const [single, setSingle] = useState<string>("");
-  const [single2, setSingle2] = useState<string>("");
-  const [colorBy, setColorBy] = useState<string>("");
-  const [bins, setBins] = useState<number>(20);
-  const [outlierMethod, setOutlierMethod] = useState<"z" | "iqr">("z");
-  const [outlierThreshold, setOutlierThreshold] = useState<number>(3);
-  const [histVariant, setHistVariant] = useState<HistogramVariant>("bar");
-  const [groupVariant, setGroupVariant] = useState<GroupByVariant>("box");
+  const [analysis, setAnalysis] = usePanelStatePartial<Analysis>(
+    "analysis", "stats", true,
+  );
+  const [multi, setMulti] = usePanelStatePartial<string[]>(
+    "multi", [], true,
+  );
+  const [single, setSingle] = usePanelStatePartial<string>(
+    "single", "", true,
+  );
+  const [single2, setSingle2] = usePanelStatePartial<string>(
+    "single2", "", true,
+  );
+  const [colorBy, setColorBy] = usePanelStatePartial<string>(
+    "colorBy", "", true,
+  );
+  const [bins, setBins] = usePanelStatePartial<number>(
+    "bins", 20, true,
+  );
+  const [outlierMethod, setOutlierMethod] = usePanelStatePartial<"z" | "iqr">(
+    "outlierMethod", "z", true,
+  );
+  const [outlierThreshold, setOutlierThreshold] = usePanelStatePartial<number>(
+    "outlierThreshold", 3, true,
+  );
+  const [histVariant, setHistVariant] = usePanelStatePartial<HistogramVariant>(
+    "histVariant", "bar", true,
+  );
+  const [groupVariant, setGroupVariant] = usePanelStatePartial<GroupByVariant>(
+    "groupVariant", "box", true,
+  );
 
   const [results, setResults] = useState<any>(null);
   const [queryError, setQueryError] = useState<string | null>(null);

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { usePanelStatePartial } from "@fiftyone/spaces";
 import {
   FormField,
   Select,
@@ -131,42 +132,85 @@ export function ClassesView(props: ClassesViewProps) {
   const sources = fieldInfo?.label_bearing_sources ?? [];
   const labelsLoaded = loadedTables.includes("labels");
 
-  const [subview, setSubview] = useState<Subview>("distribution");
+  const [subview, setSubview] = usePanelStatePartial<Subview>(
+    "classes.subview", "distribution", true,
+  );
 
   // Per-subview controls
-  const [distSources, setDistSources] = useState<string[]>([]);
-  const [topNDist, setTopNDist] = useState(20);
+  const [distSources, setDistSources] = usePanelStatePartial<string[]>(
+    "classes.distSources", [], true,
+  );
+  const [topNDist, setTopNDist] = usePanelStatePartial<number>(
+    "classes.topNDist", 20, true,
+  );
 
-  const [gtSrc, setGtSrc] = useState<string>("");
-  const [predSrc, setPredSrc] = useState<string>("");
-  const [topNGtPred, setTopNGtPred] = useState(20);
+  const [gtSrc, setGtSrc] = usePanelStatePartial<string>(
+    "classes.gtSrc", "", true,
+  );
+  const [predSrc, setPredSrc] = usePanelStatePartial<string>(
+    "classes.predSrc", "", true,
+  );
+  const [topNGtPred, setTopNGtPred] = usePanelStatePartial<number>(
+    "classes.topNGtPred", 20, true,
+  );
 
-  const [spatialSrc, setSpatialSrc] = useState<string>("");
-  const [spatialClass, setSpatialClass] = useState<string>("");
+  const [spatialSrc, setSpatialSrc] = usePanelStatePartial<string>(
+    "classes.spatialSrc", "", true,
+  );
+  const [spatialClass, setSpatialClass] = usePanelStatePartial<string>(
+    "classes.spatialClass", "", true,
+  );
   const [spatialClassOpts, setSpatialClassOpts] = useState<string[]>([]);
 
-  const [confSrc, setConfSrc] = useState<string>("");
-  const [topNConf, setTopNConf] = useState(15);
+  const [confSrc, setConfSrc] = usePanelStatePartial<string>(
+    "classes.confSrc", "", true,
+  );
+  const [topNConf, setTopNConf] = usePanelStatePartial<number>(
+    "classes.topNConf", 15, true,
+  );
 
-  const [coocSrc, setCoocSrc] = useState<string>("");
-  const [topNCooc, setTopNCooc] = useState(15);
+  const [coocSrc, setCoocSrc] = usePanelStatePartial<string>(
+    "classes.coocSrc", "", true,
+  );
+  const [topNCooc, setTopNCooc] = usePanelStatePartial<number>(
+    "classes.topNCooc", 15, true,
+  );
 
   // ----- Defaults when sources arrive -----
+  // With persisted state (usePanelStatePartial) the prev value may be a
+  // stale source name that the new view no longer exposes. For each
+  // setter, keep the persisted value only if it's still in `sources`;
+  // otherwise fall back to the heuristic default. Reads state from
+  // closure rather than via functional setters because
+  // usePanelStatePartial's setter is typed (value: T) => void.
   useEffect(() => {
     if (sources.length === 0) return;
-    setDistSources((prev) => (prev.length > 0 ? prev : sources));
-    // Heuristic: anything containing "gt" or "ground_truth" → gtSrc;
-    //            anything containing "pred" → predSrc.
+    const validDist = distSources.filter((s) => sources.includes(s));
+    const nextDist = validDist.length > 0 ? validDist : sources;
+    if (
+      nextDist.length !== distSources.length
+      || nextDist.some((s, i) => s !== distSources[i])
+    ) {
+      setDistSources(nextDist);
+    }
     const findBy = (rx: RegExp) => sources.find((s) => rx.test(s));
     const gt = findBy(/^(gt|ground_truth)/) ?? sources[0];
     const pr =
       findBy(/^(pred|prediction)/) ??
       (sources.find((s) => s !== gt) ?? sources[0]);
-    setGtSrc((p) => p || gt);
-    setPredSrc((p) => p || pr);
-    setSpatialSrc((p) => p || gt);
-    setConfSrc((p) => p || pr);
-    setCoocSrc((p) => p || gt);
+    const validOr = (current: string, fallback: string) =>
+      current && sources.includes(current) ? current : fallback;
+    const nextGt = validOr(gtSrc, gt);
+    const nextPred = validOr(predSrc, pr);
+    const nextSpatial = validOr(spatialSrc, gt);
+    const nextConf = validOr(confSrc, pr);
+    const nextCooc = validOr(coocSrc, gt);
+    if (nextGt !== gtSrc) setGtSrc(nextGt);
+    if (nextPred !== predSrc) setPredSrc(nextPred);
+    if (nextSpatial !== spatialSrc) setSpatialSrc(nextSpatial);
+    if (nextConf !== confSrc) setConfSrc(nextConf);
+    if (nextCooc !== coocSrc) setCoocSrc(nextCooc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources.join("|")]);
 
   // ----- Result state -----
