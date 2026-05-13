@@ -202,14 +202,21 @@ def _expand_fixed_list(leaf, raw):
 def _extract_top_table(view, fields, list_roots, schema):
     """Build the ``samples`` table.
 
-    Returns ``(data, columns)`` where ``data`` is the columnar dict and
-    ``columns`` is a list of ``(col_name, kind)`` pairs.
+    Returns ``(data, columns, label_aliases)`` where ``data`` is the columnar
+    dict, ``columns`` is a list of ``(col_name, kind)`` pairs, and
+    ``label_aliases`` is ``{root_safe: {original_class: slug}}`` for every
+    label-bearing root.
 
     For each list-of-doc root we additionally synthesize per-sample
     aggregates (``<root>_count``, plus ``<root>_<field>_avg/min/max`` for
-    each numeric leaf) so the samples table is a one-stop view that
-    enables cross-domain correlations without explicit SQL joins.
+    each numeric leaf, and label-specific columns for any root whose
+    embedded schema has a ``label`` field) so the samples table is a
+    one-stop view that enables cross-domain correlations without explicit
+    SQL joins.
     """
+    label_roots = set(_label_bearing_roots(schema))
+    label_aliases: dict = {}
+
     data = {"id": view.values("id")}
     columns = [("id", "categorical")]
     for path, kind in fields[:MAX_COLS_PER_TABLE]:
@@ -305,7 +312,75 @@ def _extract_top_table(view, fields, list_roots, schema):
             columns.append((f"{prefix}_min", "numeric"))
             columns.append((f"{prefix}_max", "numeric"))
 
-    return data, columns
+        # --- Label-driven columns ---
+        # Only roots whose embedded schema has a ``label`` StringField. Adds
+        # ``<root>_top_label`` (modal class), ``<root>_unique_label_count``,
+        # ``<root>_label_count_<class>`` for top-K classes, and
+        # ``<root>_label_count_other`` for the tail.
+        if root not in label_roots:
+            continue
+        if len(columns) >= MAX_COLS_PER_TABLE:
+            continue
+
+        per_sample_labels = view.values(f"{root}.{LABEL_LEAF_NAME}")
+        top_pairs, rest_pairs = _top_classes_for_root(view, root)
+        top_classes = [c for c, _ in top_pairs]
+        rest_classes_set = {c for c, _ in rest_pairs}
+
+        # Build alias map across both top and tail so the UI can label nicely.
+        # Iteration order: top first (most useful), then tail.
+        root_safe = _safe_name(root)
+        aliases = _build_class_alias_map(top_classes + sorted(rest_classes_set))
+        label_aliases[root_safe] = aliases
+
+        modal = []
+        unique_count = []
+        for ls in per_sample_labels:
+            if not ls:
+                modal.append(None)
+                unique_count.append(0)
+                continue
+            cnt: dict = {}
+            for x in ls:
+                if x is None:
+                    continue
+                cnt[x] = cnt.get(x, 0) + 1
+            if not cnt:
+                modal.append(None)
+                unique_count.append(0)
+                continue
+            # Tie-break: most frequent, then alphabetical for determinism.
+            top = sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+            modal.append(top)
+            unique_count.append(len(cnt))
+
+        data[f"{root_safe}_top_label"] = modal
+        columns.append((f"{root_safe}_top_label", "categorical"))
+        data[f"{root_safe}_unique_label_count"] = unique_count
+        columns.append((f"{root_safe}_unique_label_count", "numeric"))
+
+        # Per-class count columns
+        for cls in top_classes:
+            if len(columns) >= MAX_COLS_PER_TABLE:
+                break
+            slug = aliases[cls]
+            col = f"{root_safe}_label_count_{slug}"
+            data[col] = [
+                sum(1 for x in (ls or []) if x == cls)
+                for ls in per_sample_labels
+            ]
+            columns.append((col, "numeric"))
+
+        # Roll-up column for the tail
+        if rest_classes_set and len(columns) < MAX_COLS_PER_TABLE:
+            col = f"{root_safe}_label_count_other"
+            data[col] = [
+                sum(1 for x in (ls or []) if x in rest_classes_set)
+                for ls in per_sample_labels
+            ]
+            columns.append((col, "numeric"))
+
+    return data, columns, label_aliases
 
 
 def _extract_nested_table(view, root, leaves, sample_ids):
@@ -402,7 +477,7 @@ class DuckDBAnalyticsPanel(foo.Panel):
 
         # --- samples table ---
         top_fields = list(_top_level_scalar_fields(schema, list_roots))
-        samples_data, samples_cols = _extract_top_table(
+        samples_data, samples_cols, label_aliases = _extract_top_table(
             view, top_fields, list_roots, schema
         )
         tables = {"samples": samples_data}
@@ -434,6 +509,7 @@ class DuckDBAnalyticsPanel(foo.Panel):
             "tables": tables_info,
             "sample_count": len(view),
             "dataset_name": ctx.dataset.name,
+            "label_class_aliases": label_aliases,
         })
 
     def render(self, ctx):
