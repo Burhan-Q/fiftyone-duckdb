@@ -452,12 +452,22 @@ class DuckDBAnalyticsPanel(foo.Panel):
         )
 
     def on_load(self, ctx):
+        # on_load fires on first panel-mount of the session and again on
+        # page reload. FiftyOne persists global panel state (which is where
+        # ``_push_sig`` lives) across page reloads, but the *local* atom
+        # carrying the actual ``tables`` / ``field_info`` is session-scoped
+        # and resets on reload. So we always invalidate the cached signature
+        # on ``on_load`` and push fresh data. The signature cache still
+        # short-circuits the tab-switch case (``on_change_view``), which is
+        # the source of the visible re-mount thrashing the user reported.
+        ctx.panel.set_state("_push_sig", None)
         self._push_data(ctx)
 
     def on_change_view(self, ctx):
         self._push_data(ctx)
 
     def on_change_dataset(self, ctx):
+        ctx.panel.set_state("_push_sig", None)
         self._push_data(ctx)
 
     def _push_data(self, ctx):
