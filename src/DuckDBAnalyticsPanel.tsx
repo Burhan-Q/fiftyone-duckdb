@@ -759,7 +759,12 @@ export function DuckDBAnalyticsPanel(props: { schema?: any } = {}) {
         );
       }
       case "groupby":
-        if (!Array.isArray(results)) return null;
+        if (
+          !(
+            Array.isArray(results)
+            && results.every((r: any) => Array.isArray(r?.values))
+          )
+        ) return null;
         return (
           <GroupByChart
             groups={results}
