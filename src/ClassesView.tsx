@@ -440,7 +440,10 @@ export function ClassesView(props: ClassesViewProps) {
     );
     }
   } else if (subview === "confidence") {
-    if (!Array.isArray(result)) {
+    const safe =
+      Array.isArray(result)
+      && result.every((r: any) => Array.isArray(r?.values));
+    if (!safe) {
       resultArea = null;
     } else {
     resultArea = (
