@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import * as duckdb from "@duckdb/duckdb-wasm";
 import * as arrow from "apache-arrow";
 
@@ -29,13 +29,53 @@ type State = {
   loadedTables: string[];
 };
 
-const initial: State = {
-  ready: false,
-  loading: true,
-  error: null,
-  queryTime: 0,
-  loadedTables: [],
-};
+// ---------- Module-level singletons ----------
+// The DuckDB connection (and the set of ingested tables) persist across
+// React component re-mounts so panel-tab focus changes don't tear down and
+// rebuild the entire WASM database. Without this, the user sees the chart
+// disappear for several seconds while DuckDB re-initializes on every
+// re-mount. The Python signature guard in __init__.py keeps the input
+// `tables` / `info` references structurally stable, so the ingest effect
+// short-circuits on the second mount via the cached `_dataKey`.
+let _db: duckdb.AsyncDuckDB | null = null;
+let _conn: duckdb.AsyncDuckDBConnection | null = null;
+// _worker is held to keep the WASM worker alive for the lifetime of the page.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+let _worker: Worker | null = null;
+let _initPromise: Promise<void> | null = null;
+let _dataKey: string = "";
+let _loadedTables: string[] = [];
+let _ingestPromise: Promise<void> = Promise.resolve();
+let _queryTime: number = 0;
+
+async function ensureDuckDBInit(): Promise<void> {
+  if (_conn) return;
+  if (_initPromise) return _initPromise;
+  _initPromise = (async () => {
+    try {
+      const bundles = duckdb.getJsDelivrBundles();
+      const bundle = await duckdb.selectBundle(bundles);
+      const workerScript = URL.createObjectURL(
+        new Blob([`importScripts("${bundle.mainWorker!}");`], {
+          type: "text/javascript",
+        }),
+      );
+      const worker = new Worker(workerScript);
+      URL.revokeObjectURL(workerScript);
+      const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
+      const db = new duckdb.AsyncDuckDB(logger, worker);
+      await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+      const conn = await db.connect();
+      _db = db;
+      _conn = conn;
+      _worker = worker;
+    } catch (e) {
+      _initPromise = null; // allow retry on next call
+      throw e;
+    }
+  })();
+  return _initPromise;
+}
 
 function inferKind(values: any[]): "numeric" | "categorical" | "unknown" {
   for (const v of values) {
@@ -71,88 +111,72 @@ function buildColumns(table: ColumnarTable): Record<string, ArrayLike<any>> {
 const q = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
 export function useDuckDB(tables: Tables | null, info: FieldInfo | null) {
-  const dbRef = useRef<duckdb.AsyncDuckDB | null>(null);
-  const connRef = useRef<duckdb.AsyncDuckDBConnection | null>(null);
-  const workerRef = useRef<Worker | null>(null);
-  const dataKeyRef = useRef<string>("");
-  const tableReadyRef = useRef<Promise<void>>(Promise.resolve());
-  const [state, setState] = useState<State>(initial);
+  // Initialize state from the module cache. On a fresh page, all module
+  // singletons are empty so we render "Loading…" once; on every subsequent
+  // re-mount within the same page, `_conn` and `_loadedTables` are already
+  // populated and the panel renders its persisted chart immediately.
+  const [state, setState] = useState<State>(() => ({
+    ready: !!_conn,
+    loading: !_conn,
+    error: null,
+    queryTime: _queryTime,
+    loadedTables: _loadedTables,
+  }));
 
-  // ---- DuckDB init ----
+  // ---- DuckDB init (no-op if module singleton already initialized) ----
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const bundles = duckdb.getJsDelivrBundles();
-        const bundle = await duckdb.selectBundle(bundles);
-        const workerScript = URL.createObjectURL(
-          new Blob([`importScripts("${bundle.mainWorker!}");`], {
-            type: "text/javascript",
-          }),
-        );
-        const worker = new Worker(workerScript);
-        URL.revokeObjectURL(workerScript);
-        const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
-        const db = new duckdb.AsyncDuckDB(logger, worker);
-        await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-        const conn = await db.connect();
-        if (cancelled) {
-          await conn.close();
-          await db.terminate();
-          worker.terminate();
-          return;
-        }
-        dbRef.current = db;
-        connRef.current = conn;
-        workerRef.current = worker;
-        setState((s) => ({ ...s, ready: true, loading: false, error: null }));
-      } catch (e: any) {
-        if (!cancelled) {
-          setState((s) => ({
-            ...s,
-            ready: false,
-            loading: false,
-            error: e?.message ?? String(e),
-          }));
-        }
-      }
-    })();
+    ensureDuckDBInit()
+      .then(() => {
+        if (cancelled) return;
+        setState((s) => ({
+          ...s,
+          ready: true,
+          loading: false,
+          error: null,
+          loadedTables: _loadedTables,
+        }));
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setState((s) => ({
+          ...s,
+          ready: false,
+          loading: false,
+          error: e?.message ?? String(e),
+        }));
+      });
     return () => {
       cancelled = true;
-      const conn = connRef.current;
-      const db = dbRef.current;
-      const worker = workerRef.current;
-      connRef.current = null;
-      dbRef.current = null;
-      workerRef.current = null;
-      (async () => {
-        try {
-          if (conn) await conn.close();
-          if (db) await db.terminate();
-          worker?.terminate();
-        } catch {
-          /* ignore */
-        }
-      })();
+      // Intentionally NOT terminating the module-level db/conn/worker —
+      // they persist across re-mounts so a subsequent mount finds them
+      // ready instead of paying the WASM init cost again. The whole page
+      // load owns one DuckDB instance; the browser cleans it up on page
+      // unload.
     };
   }, []);
 
   // ---- Ingest all tables when payload changes ----
   useEffect(() => {
-    const conn = connRef.current;
-    if (!conn || !state.ready || !tables || !info) return;
+    if (!_conn || !state.ready || !tables || !info) return;
     const sig = Object.entries(tables)
       .map(([t, cols]) => `${t}(${Object.keys(cols).sort().join(",")})`)
       .sort()
       .join("|");
     const key = `${info.dataset_name ?? ""}|${info.sample_count}|${sig}`;
-    if (key === dataKeyRef.current) return;
-    dataKeyRef.current = key;
-    tableReadyRef.current = (async () => {
+    if (key === _dataKey) {
+      // Same payload as the last successful ingest — sync state and bail.
+      if (state.loadedTables !== _loadedTables) {
+        setState((s) => ({ ...s, loadedTables: _loadedTables }));
+      }
+      return;
+    }
+    _dataKey = key;
+    _ingestPromise = (async () => {
       const loaded: string[] = [];
       try {
         for (const [tname, columns] of Object.entries(tables)) {
-          await conn.query(`DROP TABLE IF EXISTS ${q(tname)}`);
+          await _conn!.query(`DROP TABLE IF EXISTS ${q(tname)}`);
           if (!columns || Object.keys(columns).length === 0) continue;
           const firstCol = Object.values(columns)[0];
           if (!firstCol || firstCol.length === 0) continue;
@@ -163,12 +187,13 @@ export function useDuckDB(tables: Tables | null, info: FieldInfo | null) {
           // versions; serializing to IPC and using ``insertArrowFromIPCStream``
           // is the reliable path.
           const ipc = arrow.tableToIPC(table, "stream");
-          await conn.insertArrowFromIPCStream(ipc, {
+          await _conn!.insertArrowFromIPCStream(ipc, {
             name: tname,
             create: true,
           });
           loaded.push(tname);
         }
+        _loadedTables = loaded;
         setState((s) => ({ ...s, loadedTables: loaded, error: null }));
       } catch (e: any) {
         setState((s) => ({ ...s, error: e?.message ?? String(e) }));
@@ -177,15 +202,21 @@ export function useDuckDB(tables: Tables | null, info: FieldInfo | null) {
   }, [tables, info, state.ready]);
 
   const runQuery = useCallback(async <T = any>(sql: string): Promise<T[]> => {
-    const conn = connRef.current;
-    if (!conn) throw new Error("DuckDB not ready");
-    await tableReadyRef.current;
+    if (!_conn) throw new Error("DuckDB not ready");
+    await _ingestPromise;
     const t0 = performance.now();
-    const result = await conn.query<any>(sql);
+    const result = await _conn.query<any>(sql);
     const rows = result.toArray().map((r: any) => r.toJSON()) as T[];
-    setState((s) => ({ ...s, queryTime: performance.now() - t0 }));
+    const elapsed = performance.now() - t0;
+    _queryTime = elapsed;
+    setState((s) => ({ ...s, queryTime: elapsed }));
     return rows;
   }, []);
+
+  // _db / _worker are kept as module references for debugging but not read
+  // after init; suppress the unused-locals warning.
+  void _db;
+  void _worker;
 
   return {
     ready: state.ready,
