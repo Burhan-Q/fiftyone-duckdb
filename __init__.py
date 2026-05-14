@@ -262,5 +262,25 @@ class LoadDatasetPayload(foo.Operator):
         }
 
 
+class SelectSamples(foo.Operator):
+    @property
+    def config(self):
+        return foo.OperatorConfig(
+            name="select_samples",
+            label="DuckDB Analytics — select samples",
+            description="Filter the FiftyOne grid to the given sample ids",
+            unlisted=True,
+        )
+
+    def execute(self, ctx):
+        ids = ctx.params.get("ids") or []
+        if not ids:
+            ctx.ops.clear_view()
+            return
+        view = ctx.dataset.select(ids, ordered=False)
+        ctx.ops.set_view(view=view)
+
+
 def register(p):
     p.register(LoadDatasetPayload)
+    p.register(SelectSamples)
