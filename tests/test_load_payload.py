@@ -61,3 +61,25 @@ def test_label_bearing_sources_populated(quickstart, fake_ctx_factory):
     sources = out["field_info"]["label_bearing_sources"]
     assert "ground_truth_detections" in sources
     assert "predictions_detections" in sources
+
+
+def test_view_stage_hash_stable_for_same_view(quickstart, fake_ctx_factory):
+    op = LoadDatasetPayload()
+    ctx1 = fake_ctx_factory(dataset=quickstart, view=quickstart.view())
+    ctx2 = fake_ctx_factory(dataset=quickstart, view=quickstart.view())
+    h1 = op.execute(ctx1)["field_info"]["view_stage_hash"]
+    h2 = op.execute(ctx2)["field_info"]["view_stage_hash"]
+    assert h1 == h2
+
+
+def test_view_stage_hash_changes_on_filter(quickstart, fake_ctx_factory):
+    op = LoadDatasetPayload()
+    base = quickstart.view()
+    filtered = quickstart.limit(10)
+    h_base = op.execute(fake_ctx_factory(quickstart, base))["field_info"][
+        "view_stage_hash"
+    ]
+    h_filt = op.execute(fake_ctx_factory(quickstart, filtered))["field_info"][
+        "view_stage_hash"
+    ]
+    assert h_base != h_filt
