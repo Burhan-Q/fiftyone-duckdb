@@ -1,4 +1,3 @@
-import React from "react";
 import { Text, TextColor } from "@voxel51/voodo";
 
 import type { QueryResult } from "./types";
