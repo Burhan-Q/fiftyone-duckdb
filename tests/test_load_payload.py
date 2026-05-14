@@ -42,6 +42,9 @@ def test_ground_truth_detections_table_present(quickstart, fake_ctx_factory):
     assert "bbox_y" in gt
     assert "bbox_w" in gt
     assert "bbox_h" in gt
+    assert "bbox_area" in gt
+    assert "bbox_cx" in gt
+    assert "bbox_cy" in gt
 
 
 def test_nested_table_row_count_positive(quickstart, fake_ctx_factory):
