@@ -41,16 +41,26 @@ declare module "@fiftyone/spaces" {
 declare module "@fiftyone/state" {
   export const view: any;
   /**
-   * Returns a setter for FiftyOne's view atom. Calling
-   * ``setView(viewStages)`` updates the App's grid view directly,
-   * bypassing the operator chain. Pass an array of view-stage objects
-   * (or an empty array to clear the view).
+   * FiftyOne's lasso-selection atom. Shape:
+   *   { selection: string[] | null, scope?: string, ... }
+   * Setting this with ``{selection: [ids], scope: PANEL_SCOPE}`` causes
+   * the App's grid to filter via the ``extendedStagesUnsorted`` selector
+   * (which derives a ``Select(sample_ids=...)`` view stage). This is the
+   * correct pattern for chart-to-view selection in JS-only panels per
+   * the embeddings-panel reference flow.
    */
-  export function useSetView(): (stages: any[]) => void;
+  export const extendedSelection: any;
+  /**
+   * Grid-checkbox selections (``Map<id, "default" | "alt">``). Cleared
+   * to ``new Map()`` immediately before writing ``extendedSelection``
+   * so the lasso supersedes any prior grid clicks.
+   */
+  export const selectedSamples: any;
 }
 
 declare module "recoil" {
   export function useRecoilValue<T>(atom: any): T;
+  export function useSetRecoilState<T>(atom: any): (v: T | ((prev: T) => T)) => void;
 }
 
 declare module "@fiftyone/operators" {

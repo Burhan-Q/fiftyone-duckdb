@@ -1,7 +1,10 @@
 import { useCallback } from "react";
-import { useSetView } from "@fiftyone/state";
+import { useSetRecoilState } from "recoil";
+import { extendedSelection, selectedSamples } from "@fiftyone/state";
 
 import type { QueryResult } from "./types";
+
+const PANEL_SCOPE = "duckdb_analytics";
 
 function pickIdColumn(result: QueryResult): string | null {
   const names = result.columns.map((c) => c.name);
@@ -11,30 +14,26 @@ function pickIdColumn(result: QueryResult): string | null {
 }
 
 /**
- * Build the FiftyOne view stages for a sample-id selection.
+ * Lasso-to-view selection for the DuckDB Analytics panel.
  *
- * - Empty ids: empty stage list (clears the view).
- * - Non-empty: single Select stage with the ids.
+ * Per ``.ref/FIFTYONE_LASSO_VIEW_UPDATE.md`` (the embeddings-panel
+ * reference flow), the canonical JS-only path is:
  *
- * Format matches what ``ctx.ops.set_view`` produces server-side, but
- * we apply it directly to the client's view atom via useSetView, which
- * is materially faster and skips the operator-queue round-trip.
+ *   1. ``setSelectedSamples(new Map())`` — clear any grid-click selection
+ *      so the lasso supersedes.
+ *   2. ``setExtendedSelection({selection: ids, scope: PANEL_SCOPE})`` —
+ *      writing the atom triggers ``extendedStagesUnsorted`` to derive a
+ *      ``Select(sample_ids=...)`` view stage; the grid re-filters
+ *      automatically via Relay.
+ *
+ * The legacy closure-current bug on ``extendedSelection`` only affects
+ * hybrid panels (those that trigger GraphQL refetches via Python
+ * lifecycle handlers). The redesigned DuckDB panel is JS-only and has
+ * no such handlers, so this path is reliable.
  */
-function buildSelectStages(ids: string[]): any[] {
-  if (ids.length === 0) return [];
-  return [
-    {
-      _cls: "fiftyone.core.stages.Select",
-      kwargs: [
-        ["sample_ids", ids],
-        ["ordered", false],
-      ],
-    },
-  ];
-}
-
 export function useSelectionDispatcher(result: QueryResult | null) {
-  const setView = useSetView();
+  const setExtendedSelection = useSetRecoilState(extendedSelection);
+  const setSelectedSamples = useSetRecoilState(selectedSamples);
 
   return useCallback(
     (indices: number[]) => {
@@ -48,9 +47,13 @@ export function useSelectionDispatcher(result: QueryResult | null) {
             .filter((v): v is string => typeof v === "string" && v.length > 0),
         ),
       );
-      setView(buildSelectStages(ids));
+      setSelectedSamples(new Map());
+      setExtendedSelection({
+        selection: ids.length > 0 ? ids : null,
+        scope: PANEL_SCOPE,
+      });
     },
-    [result, setView],
+    [result, setExtendedSelection, setSelectedSamples],
   );
 }
 
