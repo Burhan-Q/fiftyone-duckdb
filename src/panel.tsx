@@ -19,6 +19,7 @@ import { SqlEditor } from "./sqlEditor";
 import { ResultTable } from "./resultTable";
 import { ChartView, autopick } from "./chartView";
 import { TEMPLATES } from "./templates";
+import { useSelectionDispatcher, resultHasSelectableIds } from "./selection";
 import type { ChartBinding, ChartType, QueryResult } from "./types";
 
 const DEFAULT_SQL = "SELECT COUNT(*) AS n FROM samples";
@@ -51,6 +52,9 @@ export function DuckDBPanel() {
   const [result, setResult] = useState<QueryResult | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [querying, setQuerying] = useState(false);
+
+  const dispatchSelection = useSelectionDispatcher(result);
+  const selectable = resultHasSelectableIds(result);
 
   const onRun = useCallback(async () => {
     if (!ready) return;
@@ -163,6 +167,9 @@ export function DuckDBPanel() {
             <TextBadge>
               {result.rows.length.toLocaleString()} rows · {result.queryTimeMs.toFixed(1)} ms
             </TextBadge>
+            <TextBadge>
+              {selectable ? "select → filter grid" : "no sample_id — no selection"}
+            </TextBadge>
             <FormField
               label="Chart"
               control={
@@ -221,7 +228,11 @@ export function DuckDBPanel() {
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
             {effectiveBinding.type === "table"
               ? <ResultTable result={result} />
-              : <ChartView result={result} binding={effectiveBinding} />}
+              : <ChartView
+                  result={result}
+                  binding={effectiveBinding}
+                  onSelectIndices={selectable ? dispatchSelection : undefined}
+                />}
           </div>
         </Stack>
       ) : (
