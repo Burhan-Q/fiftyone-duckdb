@@ -18,6 +18,7 @@ import { useDuckDB } from "./useDuckDB";
 import { SqlEditor } from "./sqlEditor";
 import { ResultTable } from "./resultTable";
 import { ChartView, autopick } from "./chartView";
+import { TEMPLATES } from "./templates";
 import type { ChartBinding, ChartType, QueryResult } from "./types";
 
 const DEFAULT_SQL = "SELECT COUNT(*) AS n FROM samples";
@@ -114,6 +115,34 @@ export function DuckDBPanel() {
         <TextBadge>{info?.dataset_name ?? "—"}</TextBadge>
         <TextBadge>{info?.sample_count ?? 0} samples</TextBadge>
         <TextBadge>tables: {tableNames.join(", ") || "—"}</TextBadge>
+        <FormField
+          label="Template"
+          control={
+            <Select
+              exclusive
+              value=""
+              options={[
+                { id: "", data: { label: "(pick a template)" } },
+                ...TEMPLATES.map((t) => ({
+                  id: t.id,
+                  data: { label: t.label, content: <span title={t.description}>{t.label}</span> },
+                })),
+              ]}
+              onChange={(v) => {
+                const id = typeof v === "string" ? v : v?.[0] ?? "";
+                const t = TEMPLATES.find((x) => x.id === id);
+                if (!t) return;
+                setSqlText(t.sql);
+                if (t.chart) {
+                  setChartType(t.chart.type);
+                  setXCol(t.chart.x);
+                  setYCol(t.chart.y ?? "");
+                  setColorCol(t.chart.color ?? "");
+                }
+              }}
+            />
+          }
+        />
         <button onClick={refresh}>Refresh data</button>
         <button disabled={!ready || querying} onClick={onRun}>
           {querying ? "Running…" : "Run (⌘↵)"}
