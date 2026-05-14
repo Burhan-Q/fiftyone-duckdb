@@ -40,6 +40,13 @@ declare module "@fiftyone/spaces" {
 
 declare module "@fiftyone/state" {
   export const view: any;
+  /**
+   * Returns a setter for FiftyOne's view atom. Calling
+   * ``setView(viewStages)`` updates the App's grid view directly,
+   * bypassing the operator chain. Pass an array of view-stage objects
+   * (or an empty array to clear the view).
+   */
+  export function useSetView(): (stages: any[]) => void;
 }
 
 declare module "recoil" {

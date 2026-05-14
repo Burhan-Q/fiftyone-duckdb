@@ -1,9 +1,7 @@
-import { useCallback, useRef } from "react";
-import { useOperatorExecutor } from "@fiftyone/operators";
+import { useCallback } from "react";
+import { useSetView } from "@fiftyone/state";
 
 import type { QueryResult } from "./types";
-
-const SELECT_OP = "@Burhan-Q/fo-duckdb/select_samples";
 
 function pickIdColumn(result: QueryResult): string | null {
   const names = result.columns.map((c) => c.name);
@@ -12,9 +10,31 @@ function pickIdColumn(result: QueryResult): string | null {
   return null;
 }
 
+/**
+ * Build the FiftyOne view stages for a sample-id selection.
+ *
+ * - Empty ids: empty stage list (clears the view).
+ * - Non-empty: single Select stage with the ids.
+ *
+ * Format matches what ``ctx.ops.set_view`` produces server-side, but
+ * we apply it directly to the client's view atom via useSetView, which
+ * is materially faster and skips the operator-queue round-trip.
+ */
+function buildSelectStages(ids: string[]): any[] {
+  if (ids.length === 0) return [];
+  return [
+    {
+      _cls: "fiftyone.core.stages.Select",
+      kwargs: [
+        ["sample_ids", ids],
+        ["ordered", false],
+      ],
+    },
+  ];
+}
+
 export function useSelectionDispatcher(result: QueryResult | null) {
-  const executor = useOperatorExecutor(SELECT_OP);
-  const inflightRef = useRef(0);
+  const setView = useSetView();
 
   return useCallback(
     (indices: number[]) => {
@@ -28,12 +48,9 @@ export function useSelectionDispatcher(result: QueryResult | null) {
             .filter((v): v is string => typeof v === "string" && v.length > 0),
         ),
       );
-      // Token bookkeeping is preserved so a future move to an async
-      // executor (or a debouncer) has the inflight guard ready.
-      inflightRef.current += 1;
-      executor.execute({ ids });
+      setView(buildSelectStages(ids));
     },
-    [executor, result],
+    [result, setView],
   );
 }
 
