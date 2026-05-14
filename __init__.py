@@ -13,7 +13,12 @@ import fiftyone.operators.types as types
 
 NUMERIC_TYPES = (fo.IntField, fo.FloatField, fo.BooleanField)
 CATEGORICAL_TYPES = (fo.StringField,)
-SKIP_TOP_FIELDS = ("_id", "tags", "filepath", "metadata")
+SKIP_TOP_FIELDS = ("_id", "tags", "filepath")
+# Dotted struct fields whose leaves we expose as flattened samples columns
+# (``metadata.width`` → ``metadata_width``). Adds image dimensions, file
+# size, mime type, etc. — useful for correlation / scatter / outlier
+# templates that need numeric or categorical columns beyond ``uniqueness``.
+ALLOW_DOTTED_PARENTS = ("metadata",)
 
 
 def _kind_for(field):
@@ -33,13 +38,21 @@ def _list_doc_roots(schema):
 
 
 def _top_level_scalar_fields(schema, list_roots):
-    """Top-level scalar fields excluding list-rooted descendants + skip set."""
+    """Top-level scalar fields excluding list-rooted descendants + skip set.
+
+    Also includes scalar leaves of allow-listed dotted structs (e.g.
+    ``metadata.width``, ``metadata.height``). The caller is expected to
+    flatten dots to underscores when storing column names.
+    """
     list_prefixes = tuple(r + "." for r in list_roots)
+    allowed_prefixes = tuple(p + "." for p in ALLOW_DOTTED_PARENTS)
     for path, field in schema.items():
         if path.startswith(list_prefixes):
             continue
-        if "." in path:
-            continue  # nested-but-not-list-rooted (rare; skip for v1)
+        if path in ALLOW_DOTTED_PARENTS:
+            continue  # the EmbeddedDocumentField itself; we want its leaves
+        if "." in path and not path.startswith(allowed_prefixes):
+            continue
         if path in SKIP_TOP_FIELDS:
             continue
         kind = _kind_for(field)
@@ -185,17 +198,24 @@ def _view_stage_hash(view):
 
 def _extract_samples_table(view, fields):
     """Return (data, columns) where data is columnar and columns is
-    list of (name, kind)."""
+    list of (name, kind).
+
+    Dotted paths (e.g. ``metadata.width``) are flattened to underscored
+    column names (``metadata_width``) so SQL can reference them without
+    quoting.
+    """
     data = {"id": [str(_id) for _id in view.values("id")]}
     columns = [("id", "categorical")]
     for path, kind in fields:
         if path == "id":
             continue
         try:
-            data[path] = view.values(path)
+            values = view.values(path)
         except Exception:
             continue
-        columns.append((path, kind))
+        col_name = path.replace(".", "_")
+        data[col_name] = values
+        columns.append((col_name, kind))
     return data, columns
 
 

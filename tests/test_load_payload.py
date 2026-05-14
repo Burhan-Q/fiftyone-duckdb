@@ -30,6 +30,21 @@ def test_field_info_lists_numeric_and_categorical(quickstart, fake_ctx_factory):
     assert "uniqueness" in samples_info["numeric"]
 
 
+def test_metadata_columns_flattened(quickstart, fake_ctx_factory):
+    """metadata.* leaves are flattened to metadata_<leaf> on the samples table."""
+    op = LoadDatasetPayload()
+    ctx = fake_ctx_factory(dataset=quickstart, view=quickstart.view())
+    out = op.execute(ctx)
+    samples = out["tables"]["samples"]
+    info = out["field_info"]["tables"]["samples"]
+    assert "metadata_width" in samples
+    assert "metadata_height" in samples
+    assert "metadata_width" in info["numeric"]
+    assert "metadata_height" in info["numeric"]
+    # Dotted name must NOT appear (we flattened it)
+    assert "metadata.width" not in samples
+
+
 def test_ground_truth_detections_table_present(quickstart, fake_ctx_factory):
     op = LoadDatasetPayload()
     ctx = fake_ctx_factory(dataset=quickstart, view=quickstart.view())
