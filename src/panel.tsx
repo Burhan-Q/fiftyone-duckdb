@@ -38,7 +38,8 @@ const CHART_OPTIONS: { id: ChartType; label: string }[] = [
 ];
 
 export function DuckDBPanel() {
-  const { payload, loading, error, refresh } = useDatasetPayload();
+  const [autoRefresh, setAutoRefresh] = usePanelStatePartial<boolean>("autoRefresh", false, true);
+  const { payload, loading, error, refresh, stale } = useDatasetPayload(autoRefresh);
   const { ready, error: dbError, loadedTables, runQuery } = useDuckDB(payload);
 
   const [sqlText, setSqlText] = usePanelStatePartial<string>("sql", DEFAULT_SQL, true);
@@ -151,7 +152,23 @@ export function DuckDBPanel() {
         <button disabled={!ready || querying} onClick={onRun}>
           {querying ? "Running…" : "Run (⌘↵)"}
         </button>
+        <FormField
+          label="Auto-refresh"
+          control={
+            <button onClick={() => setAutoRefresh(!autoRefresh)}>
+              {autoRefresh ? "On" : "Off"}
+            </button>
+          }
+        />
       </Stack>
+
+      {stale && !autoRefresh ? (
+        <Toast
+          open
+          variant={Variant.Secondary}
+          description="View changed since last load. Click Refresh data to update."
+        />
+      ) : null}
 
       <SqlEditor value={sqlText} onChange={setSqlText} onRun={onRun} />
 
