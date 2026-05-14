@@ -33,11 +33,27 @@ function buildTraces(result: QueryResult, binding: ChartBinding) {
         },
       ];
     case "bar":
+      if (binding.color) {
+        const groups = new Map<string, number[]>();
+        result.rows.forEach((r, i) => {
+          const k = String(r[binding.color!] ?? "(null)");
+          if (!groups.has(k)) groups.set(k, []);
+          groups.get(k)!.push(i);
+        });
+        return Array.from(groups.entries()).map(([name, idxs]) => ({
+          type: "bar",
+          name,
+          x: idxs.map((i) => result.rows[i][binding.x]),
+          y: binding.y ? idxs.map((i) => result.rows[i][binding.y!]) : undefined,
+          customdata: idxs,
+        }));
+      }
       return [
         {
           type: "bar",
           x: pickValues(result, binding.x),
           y: binding.y ? pickValues(result, binding.y) : undefined,
+          customdata: result.rows.map((_, i) => i),
         },
       ];
     case "scatter":
@@ -143,6 +159,14 @@ export function ChartView({
       .filter((v: any) => typeof v === "number");
     if (idxs.length > 0) onSelectIndices(idxs);
   };
+  // Chart-type-specific drag mode:
+  // - bar / heatmap / box / violin / line / histogram: clicks select a
+  //   category/cell directly, so dragmode stays "zoom" (or "false") to
+  //   allow click events to reach the trace.
+  // - scatter / heatmap2d: regions of points/density are selected via
+  //   lasso, so dragmode is "lasso".
+  const lassoTypes = new Set(["scatter", "heatmap2d"]);
+  const dragmode = onSelectIndices && lassoTypes.has(binding.type) ? "lasso" : "zoom";
   return (
     <Plot
       data={traces as any}
@@ -151,7 +175,7 @@ export function ChartView({
           ...PLOT_LAYOUT,
           xaxis: { title: binding.x },
           yaxis: { title: binding.y },
-          dragmode: onSelectIndices ? "lasso" : "zoom",
+          dragmode,
         } as any
       }
       config={PLOT_CONFIG}
