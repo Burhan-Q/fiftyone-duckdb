@@ -38,6 +38,14 @@ declare module "@fiftyone/spaces" {
   export function usePanelId(): string;
 }
 
+declare module "@fiftyone/state" {
+  export const view: any;
+}
+
+declare module "recoil" {
+  export function useRecoilValue<T>(atom: any): T;
+}
+
 declare module "@fiftyone/operators" {
   /**
    * Returns a callback ``trigger(eventUri, params?)`` to invoke a Python

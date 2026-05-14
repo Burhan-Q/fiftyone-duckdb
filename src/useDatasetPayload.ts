@@ -1,16 +1,30 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRecoilValue } from "recoil";
 import { useOperatorExecutor } from "@fiftyone/operators";
+import * as fos from "@fiftyone/state";
 
 import type { DatasetPayload } from "./types";
 
 const LOAD_OP = "@Burhan-Q/fo-duckdb/load_dataset_payload";
 
-export function useDatasetPayload() {
+async function hashStages(stages: any): Promise<string> {
+  const payload = JSON.stringify(stages ?? []);
+  const enc = new TextEncoder().encode(payload);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export function useDatasetPayload(autoRefresh: boolean) {
   const [payload, setPayload] = useState<DatasetPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentViewHash, setCurrentViewHash] = useState("");
   const executor = useOperatorExecutor(LOAD_OP);
   const hasFiredRef = useRef(false);
+
+  const viewStages = useRecoilValue<any>(fos.view);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -18,7 +32,8 @@ export function useDatasetPayload() {
     executor.execute({});
   }, [executor]);
 
-  // Fire once on mount; subsequent invocations come from the Refresh button.
+  // Fire once on mount; subsequent invocations come from the Refresh button
+  // or auto-refresh logic.
   useEffect(() => {
     if (hasFiredRef.current) return;
     hasFiredRef.current = true;
@@ -31,8 +46,6 @@ export function useDatasetPayload() {
   useEffect(() => {
     const r = executor.result;
     if (r == null) return;
-    // FiftyOne wraps operator outputs as `{result: <outputs>}`; if the
-    // top-level shape already matches DatasetPayload, accept it directly.
     const data: any = (r && typeof r === "object" && "tables" in r)
       ? r
       : (r as any)?.result;
@@ -59,5 +72,30 @@ export function useDatasetPayload() {
     }
   }, [executor.error]);
 
-  return { payload, loading, error, refresh };
+  // Track current view's stage hash (client-side) and compare against
+  // the hash baked into the last operator response.
+  useEffect(() => {
+    let cancelled = false;
+    hashStages(viewStages).then((h) => {
+      if (!cancelled) setCurrentViewHash(h);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewStages]);
+
+  const payloadViewHash = payload?.field_info.view_stage_hash ?? "";
+  const stale = useMemo(() => {
+    if (!payload) return false;
+    if (!currentViewHash) return false;
+    return currentViewHash !== payloadViewHash;
+  }, [payload, currentViewHash, payloadViewHash]);
+
+  // Auto-refresh on view change when the toggle is on.
+  useEffect(() => {
+    if (autoRefresh && stale) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRefresh, stale]);
+
+  return { payload, loading, error, refresh, stale };
 }
