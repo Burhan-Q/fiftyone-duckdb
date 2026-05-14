@@ -1,6 +1,19 @@
-import React from "react";
+// @ts-expect-error: no type defs for the cartesian-dist sub-export
+import Plotly from "plotly.js-cartesian-dist-min";
+import createPlotlyComponent from "react-plotly.js/factory";
 
 import type { ChartBinding, ColumnMeta, QueryResult } from "./types";
+
+const Plot = createPlotlyComponent(Plotly);
+
+const PLOT_LAYOUT = {
+  paper_bgcolor: "rgba(0,0,0,0)",
+  plot_bgcolor: "rgba(0,0,0,0)",
+  font: { color: "var(--fo-palette-text-primary, #ddd)" },
+  margin: { l: 56, r: 16, t: 16, b: 56 },
+  autosize: true,
+};
+const PLOT_CONFIG = { displayModeBar: false, responsive: true };
 
 const NUMERIC_TYPES = new Set([
   "Float64", "Float32", "Int64", "Int32", "Int16", "Int8",
@@ -53,6 +66,112 @@ export function autopick(cols: ColumnMeta[]): ChartBinding {
   return { type: "table", x: "" };
 }
 
+function pickValues(result: QueryResult, col: string): any[] {
+  return result.rows.map((r) => r[col]);
+}
+
+function buildTraces(result: QueryResult, binding: ChartBinding) {
+  switch (binding.type) {
+    case "histogram":
+      return [
+        {
+          type: "histogram",
+          x: pickValues(result, binding.x),
+          nbinsx: 20,
+          marker: { color: "var(--fo-palette-primary, #ff6d04)" },
+        },
+      ];
+    case "bar":
+      return [
+        {
+          type: "bar",
+          x: pickValues(result, binding.x),
+          y: binding.y ? pickValues(result, binding.y) : undefined,
+        },
+      ];
+    case "scatter":
+      if (binding.color) {
+        const groups = new Map<string, number[]>();
+        result.rows.forEach((r, i) => {
+          const k = String(r[binding.color!] ?? "(null)");
+          if (!groups.has(k)) groups.set(k, []);
+          groups.get(k)!.push(i);
+        });
+        return Array.from(groups.entries()).map(([name, idxs]) => ({
+          type: "scattergl",
+          mode: "markers",
+          name,
+          x: idxs.map((i) => result.rows[i][binding.x]),
+          y: idxs.map((i) => result.rows[i][binding.y!]),
+          customdata: idxs,
+        }));
+      }
+      return [
+        {
+          type: "scattergl",
+          mode: "markers",
+          x: pickValues(result, binding.x),
+          y: binding.y ? pickValues(result, binding.y) : undefined,
+          customdata: result.rows.map((_, i) => i),
+        },
+      ];
+    case "line":
+      return [
+        {
+          type: "scatter",
+          mode: "lines",
+          x: pickValues(result, binding.x),
+          y: binding.y ? pickValues(result, binding.y) : undefined,
+        },
+      ];
+    case "heatmap": {
+      // result rows look like { x_col: str, y_col: str, value: num }
+      const valueCol =
+        result.columns.find((c) => c.name !== binding.x && c.name !== binding.y)
+          ?.name ?? "n";
+      const xCats = Array.from(new Set(result.rows.map((r) => String(r[binding.x]))));
+      const yCats = Array.from(new Set(result.rows.map((r) => String(r[binding.y!]))));
+      const z = yCats.map((yv) =>
+        xCats.map((xv) => {
+          const r = result.rows.find(
+            (row) => String(row[binding.x]) === xv && String(row[binding.y!]) === yv,
+          );
+          return r ? (r[valueCol] as number) : null;
+        }),
+      );
+      return [{ type: "heatmap", x: xCats, y: yCats, z, colorscale: "YlOrRd" }];
+    }
+    case "heatmap2d":
+      return [
+        {
+          type: "histogram2d",
+          x: pickValues(result, binding.x),
+          y: binding.y ? pickValues(result, binding.y) : undefined,
+          colorscale: "YlOrRd",
+        },
+      ];
+    case "box":
+    case "violin": {
+      // Group by binding.x (categorical), values from binding.y (numeric)
+      const groups = new Map<string, number[]>();
+      result.rows.forEach((r) => {
+        const k = String(r[binding.x] ?? "(null)");
+        if (!groups.has(k)) groups.set(k, []);
+        const v = r[binding.y ?? "value"];
+        if (typeof v === "number") groups.get(k)!.push(v);
+      });
+      return Array.from(groups.entries()).map(([name, values]) => ({
+        type: binding.type,
+        name,
+        y: values,
+        boxpoints: "outliers",
+      }));
+    }
+    default:
+      return [];
+  }
+}
+
 export function ChartView({
   result,
   binding,
@@ -62,9 +181,33 @@ export function ChartView({
   binding: ChartBinding;
   onSelectIndices?: (rowIndices: number[]) => void;
 }) {
-  // Implementation in the next task — this is a stub so chartView.tsx compiles.
-  void result;
-  void binding;
-  void onSelectIndices;
-  return null;
+  if (binding.type === "table") return null;
+  const traces = buildTraces(result, binding);
+  if (traces.length === 0) return null;
+  const handleEvent = (evt: any) => {
+    if (!onSelectIndices) return;
+    const pts = evt?.points ?? [];
+    const idxs = pts
+      .map((p: any) => (typeof p.customdata === "number" ? p.customdata : p.pointIndex))
+      .filter((v: any) => typeof v === "number");
+    if (idxs.length > 0) onSelectIndices(idxs);
+  };
+  return (
+    <Plot
+      data={traces as any}
+      layout={
+        {
+          ...PLOT_LAYOUT,
+          xaxis: { title: binding.x },
+          yaxis: { title: binding.y },
+          dragmode: onSelectIndices ? "lasso" : "zoom",
+        } as any
+      }
+      config={PLOT_CONFIG}
+      onClick={handleEvent}
+      onSelected={handleEvent}
+      style={{ width: "100%", height: "100%" }}
+      useResizeHandler
+    />
+  );
 }
