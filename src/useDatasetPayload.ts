@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useOperatorExecutor } from "@fiftyone/operators";
 
 import type { DatasetPayload } from "./types";
@@ -10,30 +10,54 @@ export function useDatasetPayload() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const executor = useOperatorExecutor(LOAD_OP);
+  const hasFiredRef = useRef(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(() => {
     setLoading(true);
     setError(null);
-    try {
-      const res = await executor.execute({});
-      const data = (res as any)?.result ?? null;
-      if (!data || typeof data !== "object" || !data.tables) {
-        throw new Error("Operator returned an empty payload");
-      }
-      setPayload(data as DatasetPayload);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setLoading(false);
-    }
+    executor.execute({});
   }, [executor]);
 
-  // Auto-fetch on first mount only. View-change detection is handled
-  // by the caller (panel.tsx) via the fos.view subscription.
+  // Fire once on mount; subsequent invocations come from the Refresh button.
   useEffect(() => {
+    if (hasFiredRef.current) return;
+    hasFiredRef.current = true;
     refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refresh]);
+
+  // Watch the executor's `result` — the canonical pattern for top-level
+  // Python operators in FiftyOne JS panels. `execute()` is fire-and-
+  // forget; the result lands here when the operator's Python side returns.
+  useEffect(() => {
+    const r = executor.result;
+    if (r == null) return;
+    // FiftyOne wraps operator outputs as `{result: <outputs>}`; if the
+    // top-level shape already matches DatasetPayload, accept it directly.
+    const data: any = (r && typeof r === "object" && "tables" in r)
+      ? r
+      : (r as any)?.result;
+    if (!data || typeof data !== "object" || !data.tables) {
+      setError("Operator returned an empty payload");
+      setPayload(null);
+      setLoading(false);
+      return;
+    }
+    setPayload(data as DatasetPayload);
+    setError(null);
+    setLoading(false);
+  }, [executor.result]);
+
+  // Surface operator errors.
+  useEffect(() => {
+    if (executor.error) {
+      setError(
+        typeof executor.error === "string"
+          ? executor.error
+          : (executor.error as any)?.message ?? String(executor.error),
+      );
+      setLoading(false);
+    }
+  }, [executor.error]);
 
   return { payload, loading, error, refresh };
 }

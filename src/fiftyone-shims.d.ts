@@ -29,8 +29,8 @@ declare module "@fiftyone/spaces" {
 declare module "@fiftyone/operators" {
   /**
    * Returns a callback ``trigger(eventUri, params?)`` to invoke a Python
-   * panel event handler from JS. Used by Phase 7 to call ``select_samples``
-   * after a chart selection.
+   * panel event handler from JS. (Legacy hybrid-panel surface; the
+   * redesign uses ``useOperatorExecutor`` for top-level operators.)
    */
   export function useTriggerPanelEvent(): (
     event: string,
@@ -38,4 +38,19 @@ declare module "@fiftyone/operators" {
     prompt?: boolean,
     callback?: (result: any) => void,
   ) => void;
+
+  /**
+   * Returns an executor object for a top-level Python operator.
+   * Pattern: call ``op.execute({params})`` (fire-and-forget); subscribe
+   * to ``op.result`` via ``useEffect`` to react when the response lands.
+   * The same hook serves both ``load_dataset_payload`` and
+   * ``select_samples`` calls from the redesigned panel.
+   */
+  export function useOperatorExecutor(uri: string): {
+    execute: (params?: Record<string, any>) => void;
+    result: any;
+    isExecuting?: boolean;
+    error?: any;
+    hasExecuted?: boolean;
+  };
 }

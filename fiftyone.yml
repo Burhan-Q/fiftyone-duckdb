@@ -8,3 +8,6 @@ fiftyone:
   version: ">=1.0"
 panels:
   - duckdb_analytics
+operators:
+  - load_dataset_payload
+  - select_samples
