@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { autopick } from "../../src/chartView";
+import { autopick } from "../../src/autopick";
 
 const col = (name: string, type: string) => ({ name, type });
 

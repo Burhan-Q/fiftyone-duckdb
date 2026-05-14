@@ -1,5 +1,17 @@
 // Minimal type shims for FiftyOne packages that are provided at runtime by
 // the FiftyOne App. We declare only the surface we use.
+//
+// Also: type shims for Plotly distributions that ship without `.d.ts`.
+
+declare module "plotly.js-cartesian-dist-min" {
+  const Plotly: any;
+  export default Plotly;
+}
+
+declare module "react-plotly.js/factory" {
+  const createPlotlyComponent: (plotly: any) => any;
+  export default createPlotlyComponent;
+}
 
 declare module "@fiftyone/plugins" {
   export enum PluginComponentType {
