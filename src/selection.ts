@@ -61,3 +61,18 @@ export function resultHasSelectableIds(result: QueryResult | null): boolean {
   if (!result) return false;
   return pickIdColumn(result) !== null;
 }
+
+/**
+ * Returns a callback that clears the panel's current chart-driven
+ * selection: drops the ``extendedSelection`` overlay so the grid
+ * returns to its underlying view, and wipes any grid-click selections
+ * that might still be lingering.
+ */
+export function useClearSelection() {
+  const setExtendedSelection = useSetRecoilState(extendedSelection);
+  const setSelectedSamples = useSetRecoilState(selectedSamples);
+  return useCallback(() => {
+    setExtendedSelection({ selection: null, scope: PANEL_SCOPE });
+    setSelectedSamples(new Map());
+  }, [setExtendedSelection, setSelectedSamples]);
+}

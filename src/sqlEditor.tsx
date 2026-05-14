@@ -1,4 +1,5 @@
 import React, { useCallback } from "react";
+import { EditorView } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import { sql, SQLDialect } from "@codemirror/lang-sql";
 
@@ -17,16 +18,33 @@ const DUCKDB_DIALECT = SQLDialect.define({
   treatBitsAsBytes: false,
 });
 
-const extensions = [sql({ dialect: DUCKDB_DIALECT, upperCaseKeywords: true })];
+// Theme that lets CodeMirror fill its parent and never scroll the outer
+// page. Combined with the resizable wrapper below, the editor follows
+// the user's chosen height.
+const fillHeight = EditorView.theme({
+  "&": { height: "100%" },
+  ".cm-scroller": { overflow: "auto" },
+});
+
+const extensions = [
+  sql({ dialect: DUCKDB_DIALECT, upperCaseKeywords: true }),
+  fillHeight,
+];
 
 export type SqlEditorProps = {
   value: string;
   onChange: (next: string) => void;
   onRun: () => void;
-  height?: string;
+  /** Initial editor height; the wrapper is user-resizable from this start. */
+  initialHeight?: string;
 };
 
-export function SqlEditor({ value, onChange, onRun, height = "180px" }: SqlEditorProps) {
+export function SqlEditor({
+  value,
+  onChange,
+  onRun,
+  initialHeight = "180px",
+}: SqlEditorProps) {
   const onKeyDown = useCallback(
     (evt: React.KeyboardEvent) => {
       if ((evt.metaKey || evt.ctrlKey) && evt.key === "Enter") {
@@ -37,10 +55,23 @@ export function SqlEditor({ value, onChange, onRun, height = "180px" }: SqlEdito
     [onRun],
   );
   return (
-    <div onKeyDown={onKeyDown} style={{ border: "1px solid var(--fo-palette-divider, #2c2c2c)", borderRadius: 4 }}>
+    <div
+      onKeyDown={onKeyDown}
+      style={{
+        border: "1px solid var(--fo-palette-divider, #2c2c2c)",
+        borderRadius: 4,
+        resize: "vertical",
+        overflow: "auto",
+        height: initialHeight,
+        minHeight: 80,
+        maxHeight: "60vh",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
       <CodeMirror
         value={value}
-        height={height}
+        height="100%"
         extensions={extensions}
         onChange={onChange}
         basicSetup={{
@@ -50,6 +81,7 @@ export function SqlEditor({ value, onChange, onRun, height = "180px" }: SqlEdito
           autocompletion: false,
         }}
         theme="dark"
+        style={{ flex: 1, minHeight: 0 }}
       />
     </div>
   );

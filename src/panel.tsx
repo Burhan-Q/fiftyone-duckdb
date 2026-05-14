@@ -19,8 +19,22 @@ import { SqlEditor } from "./sqlEditor";
 import { ResultTable } from "./resultTable";
 import { ChartView, autopick } from "./chartView";
 import { TEMPLATES } from "./templates";
-import { useSelectionDispatcher, resultHasSelectableIds } from "./selection";
+import { useSelectionDispatcher, resultHasSelectableIds, useClearSelection } from "./selection";
 import type { ChartBinding, ChartType, QueryResult } from "./types";
+
+// Per chart type, which column bindings are user-meaningful.
+const CHART_BINDING_FIELDS: Record<ChartType, { y: boolean; color: boolean }> = {
+  auto:       { y: false, color: false },
+  table:      { y: false, color: false },
+  bar:        { y: true,  color: true  },
+  histogram:  { y: false, color: false },
+  scatter:    { y: true,  color: true  },
+  line:       { y: true,  color: false },
+  heatmap:    { y: true,  color: false },
+  heatmap2d:  { y: true,  color: false },
+  box:        { y: true,  color: false },
+  violin:     { y: true,  color: false },
+};
 
 const DEFAULT_SQL = "SELECT COUNT(*) AS n FROM samples";
 
@@ -55,6 +69,7 @@ export function DuckDBPanel() {
   const [querying, setQuerying] = useState(false);
 
   const dispatchSelection = useSelectionDispatcher(result);
+  const clearSelection = useClearSelection();
   const selectable = resultHasSelectableIds(result);
 
   const onRun = useCallback(async () => {
@@ -137,7 +152,9 @@ export function DuckDBPanel() {
                 const id = typeof v === "string" ? v : v?.[0] ?? "";
                 const t = TEMPLATES.find((x) => x.id === id);
                 if (!t) return;
-                setSqlText(t.sql);
+                // Prepend a comment identifying the template so its origin
+                // remains visible after the dropdown clears.
+                setSqlText(`-- Template: ${t.label}\n${t.sql}`);
                 if (t.chart) {
                   setChartType(t.chart.type);
                   setXCol(t.chart.x);
@@ -211,35 +228,44 @@ export function DuckDBPanel() {
                     />
                   }
                 />
-                <FormField
-                  label="Y"
-                  control={
-                    <Select
-                      exclusive
-                      value={yCol}
-                      options={[
-                        { id: "", data: { label: "(none)" } },
-                        ...colNames.map((n) => ({ id: n, data: { label: n } })),
-                      ]}
-                      onChange={(v) => setYCol(typeof v === "string" ? v : v?.[0] ?? "")}
-                    />
-                  }
-                />
-                <FormField
-                  label="Color"
-                  control={
-                    <Select
-                      exclusive
-                      value={colorCol}
-                      options={[
-                        { id: "", data: { label: "(none)" } },
-                        ...colNames.map((n) => ({ id: n, data: { label: n } })),
-                      ]}
-                      onChange={(v) => setColorCol(typeof v === "string" ? v : v?.[0] ?? "")}
-                    />
-                  }
-                />
+                {CHART_BINDING_FIELDS[chartType].y && (
+                  <FormField
+                    label="Y"
+                    control={
+                      <Select
+                        exclusive
+                        value={yCol}
+                        options={[
+                          { id: "", data: { label: "(none)" } },
+                          ...colNames.map((n) => ({ id: n, data: { label: n } })),
+                        ]}
+                        onChange={(v) => setYCol(typeof v === "string" ? v : v?.[0] ?? "")}
+                      />
+                    }
+                  />
+                )}
+                {CHART_BINDING_FIELDS[chartType].color && (
+                  <FormField
+                    label="Color"
+                    control={
+                      <Select
+                        exclusive
+                        value={colorCol}
+                        options={[
+                          { id: "", data: { label: "(none)" } },
+                          ...colNames.map((n) => ({ id: n, data: { label: n } })),
+                        ]}
+                        onChange={(v) => setColorCol(typeof v === "string" ? v : v?.[0] ?? "")}
+                      />
+                    }
+                  />
+                )}
               </>
+            )}
+            {selectable && (
+              <button onClick={clearSelection} title="Reset grid view to the underlying dataset/view">
+                Clear selection
+              </button>
             )}
           </Stack>
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
