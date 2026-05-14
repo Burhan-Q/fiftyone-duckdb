@@ -17,7 +17,7 @@ export function useSelectionDispatcher(result: QueryResult | null) {
   const inflightRef = useRef(0);
 
   return useCallback(
-    async (indices: number[]) => {
+    (indices: number[]) => {
       if (!result) return;
       const idCol = pickIdColumn(result);
       if (!idCol) return;
@@ -28,13 +28,10 @@ export function useSelectionDispatcher(result: QueryResult | null) {
             .filter((v): v is string => typeof v === "string" && v.length > 0),
         ),
       );
-      const token = ++inflightRef.current;
-      try {
-        await executor.execute({ ids });
-        if (token !== inflightRef.current) return;
-      } catch {
-        // swallow; user can retry
-      }
+      // Token bookkeeping is preserved so a future move to an async
+      // executor (or a debouncer) has the inflight guard ready.
+      inflightRef.current += 1;
+      executor.execute({ ids });
     },
     [executor, result],
   );
