@@ -1,4 +1,4 @@
-# @Burhan-Q/fo-duckdb
+# 🦆 fiftyone-duckdb
 
 In-browser SQL analytics for FiftyOne datasets, powered by
 [DuckDB-WASM](https://github.com/duckdb/duckdb-wasm).
@@ -91,14 +91,63 @@ dataset.
 
 ## Installation
 
+Install the plugin straight from GitHub with the FiftyOne CLI:
+
 ```bash
-fiftyone plugins download https://github.com/Burhan-Q/fo-duckdb
+fiftyone plugins download https://github.com/Burhan-Q/fiftyone-duckdb
 ```
 
-Or symlink/clone the repo into your configured FiftyOne plugins directory.
+This downloads the plugin into your configured FiftyOne plugins directory
+(`~/fiftyone/__plugins__` by default, or whatever `FIFTYONE_PLUGINS_DIR`
+points to).
+
+Verify it's registered:
+
+```bash
+fiftyone plugins list
+# Expect to see: @Burhan-Q/fo-duckdb        (enabled)
+```
+
+If it shows up as disabled, enable it:
+
+```bash
+fiftyone plugins enable @Burhan-Q/fo-duckdb
+```
+
+### Manual install (alternative)
+
+If you prefer to clone or symlink the repo yourself:
+
+```bash
+git clone https://github.com/Burhan-Q/fiftyone-duckdb \
+    "$(fiftyone config plugins_dir)/@Burhan-Q/fo-duckdb"
+```
+
+The directory name on disk must match the plugin name declared in
+`fiftyone.yml` (`@Burhan-Q/fo-duckdb`).
+
+### Using the panel
+
+Launch the FiftyOne App against any dataset, open a new panel (the `+`
+tab in the workspace), and pick **DuckDB Analytics**.
+
+```python
+import fiftyone as fo
+import fiftyone.zoo as foz
+
+dataset = foz.load_zoo_dataset("quickstart")
+fo.launch_app(dataset)
+```
 
 The plugin loads DuckDB-WASM's worker and WASM binary from the jsDelivr
-CDN at runtime, so the local install stays small.
+CDN at runtime, so the local install stays small. No Python dependencies
+beyond FiftyOne itself.
+
+### Updating
+
+```bash
+fiftyone plugins download https://github.com/Burhan-Q/fiftyone-duckdb --overwrite
+```
 
 ## Development
 
